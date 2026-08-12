@@ -1,0 +1,26 @@
+{
+  "issuer": {
+    "url": "https://dex.wsinfra.scouterna.net",
+    "audiences": ["headlamp", "kubectl"]
+  },
+  "claimValidationRules": [
+    {
+      "expression": "has(claims.sub)",
+      "message": "token must have a sub claim"
+    }
+  ],
+  "claimMappings": {
+    "username": {
+      "expression": "'aks:jwt:' + claims.preferred_username"
+    },
+    "groups": {
+      "expression": "has(claims.groups) ? dyn(claims.groups).map(g, 'aks:jwt:' + string(g)) : []"
+    }
+  },
+  "userValidationRules": [
+    {
+      "expression": "user.username.startsWith('aks:jwt:')",
+      "message": "username must carry the aks:jwt: prefix"
+    }
+  ]
+}

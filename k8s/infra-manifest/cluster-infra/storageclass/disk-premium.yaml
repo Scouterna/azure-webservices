@@ -1,0 +1,16 @@
+# Opt-in Premium SSD StorageClass.
+#
+# NOT the default. Premium disks cost noticeably more than the StandardSSD
+# default (disk-standardssd). Only reference this class explicitly, from a
+# workload that genuinely needs the higher, guaranteed IOPS/throughput
+# (e.g. a busy database). Everything else should use the default class.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: disk-premium
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

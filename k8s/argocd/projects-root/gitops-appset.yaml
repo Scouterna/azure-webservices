@@ -1,0 +1,90 @@
+# Generates one Application per environment for every project that runs its OWN
+# GitOps repo, from the infra-owned declaration k8s/projects/<project>/gitops.yaml.
+#
+# The counterpart AppProject is NOT generated here — an ApplicationSet can only
+# emit Applications, and the AppProject is the security boundary, so it is a
+# plain reviewable file in k8s/argocd/projects/<project>.yaml (copied from
+# _project-gitops.yaml.example). Registering a project is therefore two files,
+# both infra-owned, both committed once.
+#
+# The generated Application's SOURCE is the project's own repo. After this, the
+# project commits there and never touches the infra repo again.
+#
+# Apply once at bootstrap (kubectl apply -f k8s/argocd/projects-root/);
+# self-manages thereafter.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: project-gitops
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    # Matrix = outer x inner. The git `files` generator reads each gitops.yaml
+    # and exposes its keys; the list generator then fans out over the
+    # `environments` array inside that same file, so one file with dev+prod
+    # produces two Applications.
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/Scouterna/azure-webservices.git
+              revision: main
+              files:
+                - path: k8s/projects/*/gitops.yaml
+          - list:
+              # elementsYaml (not elements) takes a STRING of YAML/JSON and
+              # parses it — which is how a nested array from the outer generator
+              # is expanded. `elements: []` must be omitted entirely.
+              elementsYaml: '{{ .environments | toJson }}'
+  template:
+    metadata:
+      name: '{{.project}}-{{.name}}'
+    spec:
+      # The project's OWN AppProject — scoped to its repo and its namespaces.
+      # There is no shared apps-dev/apps-prod any more.
+      project: '{{.project}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.project}}-{{.name}}'
+      source:
+        # The PROJECT's repo, not this one.
+        repoURL: '{{.repoURL}}'
+        targetRevision: '{{.revision}}'
+        path: '{{.path}}'
+      syncPolicy:
+        # `automated` is added by templatePatch below, only for environments
+        # that ask for it — see the comment there.
+        syncOptions:
+          # The namespace is Layer 1, created by the project-infra
+          # ApplicationSet from infra/namespace-<env>.yaml.
+          - CreateNamespace=false
+          - ServerSideApply=true
+  # templatePatch renders RAW YAML, so it is the only place a field can be
+  # conditionally OMITTED. It is needed here because syncPolicy.automated is a
+  # strictly-typed object in the Application CRD: templating a value into it
+  # (`enabled: '{{.automated}}'`) would emit the STRING "true" and be rejected,
+  # and an empty `automated: {}` still enables auto-sync — the difference
+  # between automated and manual is the field's PRESENCE.
+  #
+  # Prod is normally automated: true so Git is authoritative. Dev is normally
+  # false so the project can keep hand-editing; note that a later sync DISCARDS
+  # those edits (docs/argocd.md).
+  #
+  # syncOptions is repeated here rather than left to the base template: when
+  # `automated` is false the patch would otherwise render a bare
+  # `syncPolicy:` (null), which merges as an explicit null and wipes the
+  # syncOptions from the template above.
+  templatePatch: |
+    spec:
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+    {{- if .automated }}
+        automated:
+          selfHeal: true
+          # prune off: removing a manifest should not silently delete a running
+          # workload. Deleting is deliberate.
+          prune: false
+    {{- end }}

@@ -1,0 +1,33 @@
+# Wave 4 — vendored Grafana dashboards for the infra components, one labeled
+# ConfigMap each (the Grafana sidecar loads anything with grafana_dashboard: "1").
+# Wave 4 so it lands after monitoring (wave 2) exists.
+#
+# The JSON is vendored under k8s/infra-manifest/monitoring/dashboards/ rather than
+# fetched by gnetId at runtime: what is reviewed is what runs, and pod startup does
+# not depend on grafana.com being reachable. Regenerate the ConfigMaps after
+# editing any dashboard JSON — see monitoring/dashboards/README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dashboards
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/monitoring/dashboards-cm
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

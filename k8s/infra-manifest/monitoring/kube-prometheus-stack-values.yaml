@@ -1,0 +1,154 @@
+grafana:
+
+  # The admin account is BREAK-GLASS ONLY — daily access is via GitHub OAuth
+  # below. The password is random, seeded into the grafana-admin secret (Phase 1
+  # bootstrap; later an ExternalSecret from Key Vault). Retrieve it only to
+  # recover if GitHub OAuth is unavailable.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # GitHub OAuth client secret, injected as GF_AUTH_GITHUB_CLIENT_SECRET from a
+  # Kubernetes secret (NOT committed). Seed `grafana-github-oauth` with key
+  # `client-secret` at bootstrap, or (preferred) materialize it via an
+  # ExternalSecret from Key Vault. See k8s/infra-manifest/external-secrets/.
+  extraSecretMounts:
+    - name: github-oauth
+      secretName: grafana-github-oauth
+      mountPath: /etc/secrets/github-oauth
+      readOnly: true
+  # Point Grafana's [auth.github] client_secret at the mounted file.
+  env:
+    GF_AUTH_GITHUB_CLIENT_SECRET__FILE: /etc/secrets/github-oauth/client-secret
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      acme.cert-manager.io/http01-ingress-class: "traefik"
+    hosts:
+      - grafana.wsinfra.scouterna.net
+    path: /
+    tls:
+      - secretName: grafana-wsinfra-scouterna-net-tls
+        hosts:
+          - grafana.wsinfra.scouterna.net
+
+  grafana.ini:
+    server:
+      domain: grafana.wsinfra.scouterna.net
+      root_url: https://grafana.wsinfra.scouterna.net
+
+    # Daily login = GitHub OAuth, restricted to the Scouterna org.
+    # Create a GitHub OAuth App (Scouterna org -> Settings -> Developer settings
+    # -> OAuth Apps): Homepage https://grafana.wsinfra.scouterna.net,
+    # callback https://grafana.wsinfra.scouterna.net/login/github.
+    # Put the Client ID below; the Client Secret comes from the mounted secret
+    # (GF_AUTH_GITHUB_CLIENT_SECRET__FILE above), not this file.
+    auth.github:
+      enabled: true
+      client_id: <GRAFANA_GITHUB_CLIENT_ID>
+      scopes: user:email,read:org
+      auth_url: https://github.com/login/oauth/authorize
+      token_url: https://github.com/login/oauth/access_token
+      api_url: https://api.github.com/user
+      allow_sign_up: true
+      # Only members of the Scouterna GitHub org may log in.
+      allowed_organizations: Scouterna
+      # Case-sensitive '@<Org>/<team-slug>': org keeps its casing, slug is
+      # lowercased. A wrong string silently falls through to Viewer.
+      role_attribute_path: >-
+        contains(groups[*], '@Scouterna/webservices-infra') && 'Admin' ||
+        'Viewer'
+      skip_org_role_sync: false
+
+    auth:
+      # Break-glass: keep enabled, a bad role_attribute_path locks everyone to Viewer.
+      disable_login_form: false
+      oauth_auto_login: false
+    users:
+      auto_assign_org_role: Viewer
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 200Mi
+    limits:
+      memory: 900Mi
+
+  persistence:
+    enabled: true
+    storageClassName: disk-standardssd
+    size: 8Gi
+
+  # Explicit uids: vendored dashboards reference datasources by UID, and without
+  # one here Grafana generates a random uid per install.
+  #
+  # deleteDatasources runs before provisioning and is required to CHANGE a uid:
+  # Grafana stores datasources in its database and provisioning only sets the uid
+  # on create, so an existing Loki/Thanos keeps its old random uid forever
+  # (the API refuses too — "cannot delete read-only data source"). Harmless to
+  # keep: on a fresh install there is nothing to delete.
+  deleteDatasources:
+    - name: Loki
+      orgId: 1
+    - name: Thanos
+      orgId: 1
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      jsonData:
+        maxLines: 1000
+    # Thanos Query — long-term / HA metrics (federates the live Prometheus
+    # sidecar + the MinIO-backed store gateway). Prometheus-compatible API on
+    # the thanos-query service (HTTP port 10902).
+    - name: Thanos
+      uid: thanos
+      type: prometheus
+      access: proxy
+      url: http://thanos-query.monitoring.svc.cluster.local:10902
+      jsonData:
+        timeInterval: 30s
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: 12GB
+    # Thanos sidecar: uploads Prometheus TSDB blocks to the MinIO `thanos`
+    # bucket (config in the thanos-objstore secret) for long-term/HA metrics.
+    # Thanos Query/Store/Compactor read the same bucket.
+    thanos:
+      objectStorageConfig:
+        existingSecret:
+          name: thanos-objstore
+          key: objstore.yml
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        memory: 600Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: disk-standardssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 32Gi
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: disk-standardssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 4Gi

@@ -1,0 +1,67 @@
+# AppProject for the INFRA-OWNED per-project resources (namespace, developer
+# RBAC, and opt-in shared services like a CloudNativePG database).
+#
+# This is the privileged boundary: the ApplicationSet in k8s/argocd/projects-root/
+# generates one Application per project (from k8s/projects/<project>/infra/) that
+# runs under THIS project.
+#
+# A project's OWN workload never runs here. It either runs by hand, or under the
+# project's own AppProject (k8s/argocd/projects/<project>.yaml), which is scoped
+# to that project's repo and namespaces and cannot create RBAC, ServiceAccounts,
+# Secrets, ExternalSecrets, databases or ArgoCD Applications.
+#
+# Blast radius is deliberately wider (this must create Namespaces + RBAC
+# bindings + CNPG resources) but is still infra-owned: ONLY files committed
+# under k8s/projects/*/infra/ land here, and only infra can commit them. This
+# project must never accept a project-controlled source — its RoleBinding +
+# namespace '*' combination is the escalation path in this cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: project-infra
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Infra-owned per-project resources (namespace, RBAC, shared DBs)
+  # EXACTLY this repo, not a glob. Everything this project syncs comes from
+  # k8s/projects/*/infra/ here, so nothing else needs to be reachable — and this
+  # is the AppProject that may create RoleBindings in any namespace, so a
+  # misapplied Application spec here is the worst case in the cluster.
+  #
+  # (Third-party sources like the Gateway API CRDs run under `infra`, not this
+  # project, so pinning here costs nothing.)
+  sourceRepos:
+    - 'https://github.com/Scouterna/azure-webservices.git'
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+  # Cluster-scoped resources these Applications may manage.
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+  # Namespaced resources. RoleBinding/ServiceAccount for developer access;
+  # ExternalSecret for the shared-database credentials. The CNPG + PodMonitor
+  # entries are for the escape hatch only — a project that needs its OWN
+  # Postgres instance rather than a database on the shared server. The shared
+  # server's own Database/DatabaseRole are infra-owned and live in
+  # k8s/infra-manifest/postgres/databases/ (CNPG resolves spec.cluster by name
+  # within a namespace, so they cannot live here).
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: ServiceAccount
+    - group: 'rbac.authorization.k8s.io'
+      kind: RoleBinding
+    - group: 'postgresql.cnpg.io'
+      kind: '*'
+    - group: 'external-secrets.io'
+      kind: ExternalSecret
+    # Committed SealedSecrets. Safe to permit: the ciphertext is bound to this
+    # cluster's key AND to its own namespace/name, so it cannot be retargeted.
+    - group: 'bitnami.com'
+      kind: SealedSecret
+    # Scrape config only — a PodMonitor cannot grant access to anything, it just
+    # tells Prometheus what to poll. Without this the database PodMonitor is
+    # rejected with "not permitted in project".
+    - group: 'monitoring.coreos.com'
+      kind: PodMonitor

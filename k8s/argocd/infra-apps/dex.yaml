@@ -1,0 +1,36 @@
+# Wave 2 — Dex (OIDC identity provider fronting GitHub). Provides SSO login for
+# Headlamp (and later kubectl via AKS structured auth). Needs Traefik + a cert
+# issuer (wave 1) and the ESO-managed `dex-oauth` secret (external-secrets-config,
+# wave 1). Comes up before Headlamp (wave 3) so Headlamp's OIDC issuer exists.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dex
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dex
+  sources:
+    - repoURL: https://charts.dexidp.io
+      chart: dex
+      targetRevision: 0.24.1
+      helm:
+        releaseName: dex
+        valueFiles:
+          - $values/k8s/infra-manifest/dex/values.yaml
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

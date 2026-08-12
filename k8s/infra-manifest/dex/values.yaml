@@ -1,0 +1,117 @@
+# Dex — OIDC identity provider fronting GitHub, so cluster services (Headlamp,
+# and later kubectl via AKS structured auth) get SSO login with GitHub identities
+# instead of static tokens. Mirrors the GitHub-OAuth pattern Grafana already uses.
+#
+# Auth flow: user -> Dex -> GitHub OAuth -> Dex issues an OIDC token whose
+# `name` claim is the GitHub login (used as the Kubernetes RBAC `kind: User`).
+# Access to the Scouterna GitHub org is required (orgs filter below).
+#
+# The GitHub OAuth App's client SECRET is NOT in this file — it is delivered by
+# ESO from Key Vault into secret `dex-oauth` (key `github-client-secret`) and
+# referenced via the envVars below. The client ID is public, set here.
+
+replicaCount: 1
+
+# Dex needs its config templated with the GitHub client secret from the env var
+# $GITHUB_CLIENT_SECRET (injected from the ESO-managed secret). The chart
+# supports Go-template expansion of env vars in the config when envVars are set.
+config:
+  issuer: https://dex.wsinfra.scouterna.net
+
+  storage:
+    type: memory   # single-replica; connectors are stateless. Revisit for HA.
+
+  # OAuth2 token lifetimes. id_tokens are short-lived but Headlamp silently
+  # refreshes them using the refresh token (see the offline_access scope on the
+  # headlamp client below) — so the login session survives well past idToken
+  # expiry, up to the refresh-token idle window.
+  expiry:
+    idTokens: "24h"
+    refreshTokens:
+      validIfNotUsedFor: "168h"    # 7d idle window; keeps a dev logged in
+      absoluteLifetime: "720h"     # 30d hard cap
+
+  oauth2:
+    skipApprovalScreen: true
+
+  # Upstream identity provider: GitHub. Only members of the Scouterna org may
+  # authenticate. The client secret is expanded from the env var at runtime.
+  connectors:
+    - type: github
+      id: github
+      name: GitHub
+      config:
+        clientID: <DEX_GITHUB_CLIENT_ID>          # Dex's own GitHub OAuth App (client id is public)
+        clientSecret: $GITHUB_CLIENT_SECRET         # expanded from env (ESO secret)
+        redirectURI: https://dex.wsinfra.scouterna.net/callback
+        orgs:
+          - name: Scouterna
+        # Use the GitHub login (not the numeric id or name) as the username so
+        # it matches our RBAC `kind: User` convention (e.g. hakan-persson).
+        useLoginAsID: true
+        # Emit the user's GitHub team memberships in the `groups` claim so RBAC
+        # can grant by team (e.g. the "Webservices Infra" team -> cluster-admin).
+        # Dex renders groups as `<org>:<team>` — verify the exact string (team
+        # name vs slug) against a real token before binding RBAC to it.
+        loadAllGroups: true
+
+  # Static clients that trust Dex.
+  # NOTE: if Headlamp login fails with a redirect_uri mismatch, the usual cause
+  # is Headlamp building an http:// callback behind the https ingress (it trusts
+  # X-Forwarded-Proto). Traefik sets that header by default; if needed, pin
+  # Headlamp's callback explicitly rather than changing Traefik.
+  staticClients:
+    - id: headlamp
+      name: Headlamp
+      redirectURIs:
+        - https://headlamp.wsinfra.scouterna.net/oidc-callback
+      secretEnv: HEADLAMP_CLIENT_SECRET             # expanded from env (ESO secret)
+    # kubectl via int128/kubelogin (kubectl oidc-login). A PUBLIC client (no
+    # secret — it is a CLI on a user's laptop, can't keep one) using PKCE.
+    # kubelogin's local callback listens on 127.0.0.1; register the ports it
+    # uses (8000 default, plus a couple of fallbacks).
+    - id: kubectl
+      name: kubectl (kubelogin)
+      public: true
+      redirectURIs:
+        - http://localhost:8000
+        - http://127.0.0.1:8000
+        - http://localhost:18000
+
+# Inject the GitHub client secret and the Headlamp client secret from the
+# ESO-managed Kubernetes secret `dex-oauth` into Dex's environment, so the
+# config templating above can reference them.
+envVars:
+  - name: GITHUB_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-oauth
+        key: github-client-secret
+  - name: HEADLAMP_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-oauth
+        key: headlamp-client-secret
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-ingress-class: traefik
+  hosts:
+    - host: dex.wsinfra.scouterna.net
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: dex-tls
+      hosts:
+        - dex.wsinfra.scouterna.net
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

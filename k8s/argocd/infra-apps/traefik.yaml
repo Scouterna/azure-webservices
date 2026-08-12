@@ -1,0 +1,34 @@
+# Wave 1 — Traefik (ingress + LoadBalancer). Needs the Gateway API CRDs applied
+# at bootstrap (see docs/install.md) and cert-manager (wave 0).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      targetRevision: 41.0.2
+      helm:
+        releaseName: traefik
+        valueFiles:
+          - $values/k8s/infra-manifest/traefik/values.yaml
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,59 @@
+# ApplicationSet that auto-discovers projects and deploys their INFRA-OWNED
+# resources (namespace, developer RBAC, opt-in shared DB) — the things a project
+# cannot create for itself.
+#
+# Onboarding a project becomes: copy k8s/projects/_template/ to
+# k8s/projects/<project>/, fill in the name, commit. This ApplicationSet finds
+# the new <project>/infra/ directory and generates an Application that syncs it.
+# No hand-applied kubectl.
+#
+# It manages ONLY the infra/ subdirectory — Layer 1. A project's own workload is
+# never swept up here: it runs by hand, or from the project's OWN GitOps repo via
+# gitops-appset.yaml in this directory.
+#
+# Apply once at bootstrap (kubectl apply -f); self-manages thereafter.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: project-infra
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/Scouterna/azure-webservices.git
+        revision: main
+        directories:
+          - path: k8s/projects/*/infra
+          - path: k8s/projects/_template/infra
+            exclude: true
+  template:
+    metadata:
+      # segment 2 is the <project> in k8s(0)/projects(1)/<project>(2)/infra(3)
+      name: 'project-infra-{{index .path.segments 2}}'
+    spec:
+      project: project-infra
+      source:
+        repoURL: https://github.com/Scouterna/azure-webservices.git
+        targetRevision: main
+        path: '{{.path.path}}'
+        directory:
+          recurse: false
+          # Only apply real manifests; skip the *.example reference files.
+          # namespace.yaml covers a single-namespace project; namespace-*.yaml
+          # covers dev/prod/staging etc. A file that matches nothing here is
+          # ignored SILENTLY — extend this list when adding a manifest kind.
+          include: '{namespace.yaml,namespace-*.yaml,developer-rbac.yaml,database.yaml,sealedsecret-*.yaml}'
+      destination:
+        server: https://kubernetes.default.svc
+      syncPolicy:
+        automated:
+          # selfHeal keeps the cluster matching git; prune is OFF so removing a
+          # project's dir from git does NOT auto-delete a live namespace and all
+          # its data — infra deletes namespaces deliberately.
+          selfHeal: true
+          prune: false
+        syncOptions:
+          - CreateNamespace=false   # the namespace-*.yaml IS the namespace
+          - ServerSideApply=true

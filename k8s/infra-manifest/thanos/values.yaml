@@ -1,0 +1,72 @@
+# Thanos — long-term + HA metrics on top of Prometheus.
+# Uses the upstream quay.io/thanos/thanos image (via the stevehipwell chart).
+# Reads the MinIO `thanos` bucket — the same bucket the Prometheus Thanos
+# sidecar uploads TSDB blocks to (objstore config in the thanos-objstore secret).
+
+# Point every component at the existing thanos-objstore secret (created out of
+# band; on the real cluster its creds come from ESO). Key is objstore.yml.
+objstoreConfig:
+  create: false
+  name: thanos-objstore
+  key: objstore.yml
+
+# Query: unified view over the live Prometheus sidecar + the Store gateway.
+# The sidecar's gRPC is discovered via the prometheus-operated headless service
+# (DNS SRV on the grpc port 10901). The chart's own storeGateway endpoint is
+# wired automatically.
+additionalEndpoints:
+  - dnssrv+_grpc._tcp.prometheus-operated.monitoring.svc.cluster.local
+
+query:
+  enabled: true
+  enableDnsDiscovery: true
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+queryFrontend:
+  enabled: false
+
+# Store gateway: serves historical blocks from object storage.
+# persistence off (chart default): the volume is only a local index cache — the
+# blocks themselves live in the MinIO bucket. A restart re-downloads the cache,
+# costing slower first queries, not data. Azure caps attachable disks per node
+# (12 on D4s_v6) and that limit, not CPU, is what this cluster runs out of first.
+storeGateway:
+  enabled: true
+  replicas: 1
+  persistence:
+    enabled: false
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# Compactor: compaction + downsampling + retention on the bucket.
+# persistence off for the same reason — this volume is compaction scratch space.
+compact:
+  enabled: true
+  # Thanos defaults to retention 0 = keep every raw block FOREVER; unbounded,
+  # it eventually forces MinIO PVC tier bumps. The chart has no retention
+  # values, so the flags go in raw.
+  extraArgs:
+    - --retention.resolution-raw=30d
+    - --retention.resolution-5m=90d
+    - --retention.resolution-1h=1y
+  persistence:
+    enabled: false
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# Not needed for this single-cluster setup.
+receive:
+  enabled: false
+rule:
+  enabled: false
+
+# Prometheus metrics for all Thanos components (Prometheus selects on release=kps).
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kps

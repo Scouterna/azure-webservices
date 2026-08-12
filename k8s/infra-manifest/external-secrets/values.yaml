@@ -1,0 +1,39 @@
+# External Secrets Operator (ESO).
+# Reconciles native k8s Secrets from Azure Key Vault. Authenticates to Azure via
+# Workload Identity — the ESO ServiceAccount federates to a user-assigned managed
+# identity that holds 'Key Vault Secrets User' on the vault (no static creds).
+#
+# The clientID is injected at install time via --set (it's an Azure identity ID,
+# not a secret, but kept out of the committed file so this stays cluster-agnostic).
+installCRDs: true
+
+# Label the pods for Azure Workload Identity, and annotate the SA with the
+# managed identity's client ID.
+serviceAccount:
+  create: true
+  name: external-secrets
+  # annotations.azure.workload.identity/client-id is set via --set at install.
+
+podLabels:
+  azure.workload.identity/use: "true"
+
+# The webhook + cert-controller also run; modest resources for a shared cluster.
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 192Mi
+
+# Prometheus metrics for the operator (Prometheus selects on release=kps).
+serviceMonitor:
+  enabled: true
+  # ESO is wave 0, kube-prometheus-stack (which owns the ServiceMonitor CRD) is
+  # wave 2. The chart's default renderMode `skipIfMissing` would silently emit
+  # NOTHING at first sync and never revisit it. alwaysRender emits the CR, which
+  # FAILS until the CRD lands — retries are finite (5), so on a first install the
+  # budget is usually spent before wave 2. Re-sync ESO after monitoring is up;
+  # a refresh alone will not restart a stalled operation. See docs/install.md §10.
+  renderMode: alwaysRender
+  additionalLabels:
+    release: kps

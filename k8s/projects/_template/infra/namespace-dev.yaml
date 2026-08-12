@@ -1,0 +1,8 @@
+# Dev namespace for the project.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: PROJECT-dev
+  labels:
+    scouterna.se/project: PROJECT
+    scouterna.se/env: dev

@@ -1,0 +1,47 @@
+# Wave 0 — Gateway API CRDs (standard channel). Traefik's kubernetesGateway
+# provider (wave 1) needs these; installing them here keeps the whole platform
+# in GitOps instead of a hand-applied kubectl step.
+#
+# Sourced straight from the upstream gateway-api repo at a pinned tag — the same
+# CRDs that ship in that release's standard-install.yaml. Bump targetRevision to
+# upgrade (see docs/maintenance.md), in step with Traefik's supported version.
+#
+# PIN TO TRAEFIK'S VERSION, NOT TO LATEST. Traefik v3.7.6 (chart 41.0.2) is built
+# against sigs.k8s.io/gateway-api v1.5.1 — check its go.mod before bumping:
+#   curl -s https://raw.githubusercontent.com/traefik/traefik/<tag>/go.mod | grep gateway-api
+# Installing CRDs newer than the controller (v1.6.x today) puts the schema ahead
+# of the code that reads it, with no benefit — Traefik cannot use fields it was
+# not compiled for.
+#
+# ServerSideApply is required: the CRD schemas are large enough to exceed the
+# client-side last-applied-configuration annotation limit (same reason the ArgoCD
+# install needs --server-side).
+#
+# Pruning is disabled for this app (syncPolicy.automated.prune: false): deleting
+# a CRD cascades to every Gateway/HTTPRoute in the cluster, so these must never be
+# pruned by an out-of-sync or deleted app. Upgrades still apply in place.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway-api-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  source:
+    repoURL: https://github.com/kubernetes-sigs/gateway-api.git
+    targetRevision: v1.5.1
+    path: config/crd/standard
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true

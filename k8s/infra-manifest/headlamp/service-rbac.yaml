@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp
+  namespace: headlamp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: headlamp
+  namespace: headlamp
+  labels:
+    app.kubernetes.io/name: headlamp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: headlamp
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# Deliberately minimal, NOT cluster-admin — user actions proxy the user's own
+# token. Narrowing this fails quietly; verify per docs/install.md §11.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: headlamp-discovery
+  labels:
+    app.kubernetes.io/name: headlamp
+rules:
+  # API discovery, to build the resource map before anyone logs in.
+  - nonResourceURLs:
+      - /api
+      - /api/*
+      - /apis
+      - /apis/*
+      - /version
+      - /openapi
+      - /openapi/*
+    verbs: ["get"]
+  # "What may the CURRENT user do?" — evaluated against the caller, grants nothing.
+  - apiGroups: ["authorization.k8s.io"]
+    resources:
+      - selfsubjectaccessreviews
+      - selfsubjectrulesreviews
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-discovery
+  labels:
+    app.kubernetes.io/name: headlamp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: headlamp-discovery
+subjects:
+  - kind: ServiceAccount
+    name: headlamp
+    namespace: headlamp

@@ -1,0 +1,30 @@
+# Wave 2 — the shared PostgreSQL server. Wave 2 so the CNPG operator (wave 1)
+# and its CRDs exist, and the ESO ClusterSecretStore (wave 1) can resolve the
+# backup key from Key Vault.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/postgres
+    directory:
+      recurse: false          # databases/ is a separate app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

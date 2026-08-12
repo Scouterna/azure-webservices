@@ -1,0 +1,30 @@
+# Wave 3 — Headlamp (k8s web UI). Deployed as PLAIN MANIFESTS (not the Helm
+# chart) so OIDC/Dex login can take its client secret from ESO without leaking
+# it into git — see k8s/infra-manifest/headlamp/deployment.yaml for why the chart
+# couldn't. Needs Traefik + a cert issuer (wave 1), Dex (wave 2), and the
+# ESO-managed headlamp-oidc secret (external-secrets-config, wave 1).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: headlamp
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: headlamp
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/headlamp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

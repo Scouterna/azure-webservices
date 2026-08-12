@@ -1,0 +1,32 @@
+# Wave 0 — raw cluster manifests: StorageClasses + cert-manager ClusterIssuers.
+# Plain kubectl-style manifests (a directory source), not a Helm chart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-infra
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/cluster-infra
+    directory:
+      recurse: true
+      # The monitor-limits/ dir holds reactive templates that are NOT applied by
+      # default (they contain a NAMESPACE placeholder); exclude them from sync.
+      exclude: '{monitor-limits/*,**/README.md}'
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true

@@ -1,0 +1,93 @@
+# AppProject for a project that runs its OWN GitOps repo.
+#
+# Copy to <project>.yaml, replace PROJECT and the repo URL, commit. The wave -1
+# `argocd-projects` app applies everything in this directory, so committing is
+# all that is needed.
+#
+# THIS FILE IS THE SECURITY BOUNDARY. The project controls its repo's contents,
+# so nothing reviews what it deploys — this whitelist is the only thing standing
+# between a commit in their repo and the cluster. Read the exclusions before
+# widening anything.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: PROJECT
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: PROJECT — self-service GitOps from the project's own repo
+
+  # EXACTLY this project's repo. Never a github.com/** glob: that would let any
+  # Application in this project pull from any repo on GitHub.
+  #
+  # If a glob is ever genuinely needed (e.g. a project splitting across several
+  # repos), note that a single '*' does NOT match across '/' — 'https://github.com/*'
+  # matches nothing useful; 'https://github.com/Scouterna/**' is the org-wide form.
+  sourceRepos:
+    - 'https://github.com/Scouterna/PROJECT-gitops.git'
+
+  # ONLY this project's namespaces. This is what makes the model per-project;
+  # a `namespace: '*'` here would let the project deploy into any namespace in
+  # the cluster, including argocd and kube-system.
+  destinations:
+    - namespace: PROJECT-dev
+      server: https://kubernetes.default.svc
+    - namespace: PROJECT-prod
+      server: https://kubernetes.default.svc
+
+  # No cluster-scoped resources at all. Namespaces are Layer 1 and come from
+  # k8s/projects/PROJECT/infra/, applied by the project-infra ApplicationSet.
+  clusterResourceWhitelist: []
+
+  # Workload kinds only. An absent whitelist means EVERYTHING is allowed, so
+  # this list must stay present even if it looks long.
+  namespaceResourceWhitelist:
+    - group: 'apps'
+      kind: Deployment
+    - group: 'apps'
+      kind: StatefulSet
+    - group: 'apps'
+      kind: DaemonSet
+    - group: 'batch'
+      kind: Job
+    - group: 'batch'
+      kind: CronJob
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: PersistentVolumeClaim
+    - group: 'networking.k8s.io'
+      kind: Ingress
+    - group: 'networking.k8s.io'
+      kind: NetworkPolicy
+    - group: 'autoscaling'
+      kind: HorizontalPodAutoscaler
+    - group: 'policy'
+      kind: PodDisruptionBudget
+    # Scrape config only — a ServiceMonitor cannot grant access to anything.
+    - group: 'monitoring.coreos.com'
+      kind: ServiceMonitor
+    # Traefik routing within the project's own namespaces.
+    - group: 'traefik.io'
+      kind: IngressRoute
+    - group: 'traefik.io'
+      kind: Middleware
+
+  # DELIBERATELY EXCLUDED — each of these is a real escalation, not an oversight:
+  #
+  #   RoleBinding, Role   bind ClusterRole/admin (or cluster-admin) to themselves
+  #   ServiceAccount      mints an identity, and a token with it
+  #   Secret              credentials stay infra-granted; also keeps plaintext
+  #                       out of the project's own Git history
+  #   ExternalSecret      would read any Key Vault secret ESO's identity can reach
+  #   argoproj.io/*       an Application with `project: infra` is a ONE-FILE
+  #                       escape to cluster-admin — Application and AppProject
+  #                       are themselves namespaced CRs in argocd
+  #   postgresql.cnpg.io  databases are Layer 1, on the shared server
+  #   SealedSecret        would let the project mint Secrets indirectly
+  #
+  # Anything the project needs from this list is an infra request, delivered
+  # through k8s/projects/PROJECT/infra/ — which only infra can commit.

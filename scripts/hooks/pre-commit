@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Guard the template: refuse a commit that fills in or deletes a §9 placeholder.
+#
+# Enable with scripts/install-hooks.sh. On an install branch, where filling them
+# in IS the point, skip a single commit with:  git commit --no-verify
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Only run when a k8s manifest is staged — an unrelated commit shouldn't pay for
+# this. No --diff-filter: a commit that only DELETES or renames a manifest can
+# remove required placeholders too.
+staged=$(git diff --cached --name-only -- 'k8s/*.yaml' 'k8s/*.yml' || true)
+[[ -z "$staged" ]] && exit 0
+
+# --staged checks the INDEX (what this commit will contain), not the working
+# tree — otherwise `git add` + `git restore --worktree` would slip a filled-in
+# value past the hook, and unstaged edits would block innocent commits.
+if ! scripts/check-placeholders.sh --expect-template --staged >/dev/null 2>&1; then
+  scripts/check-placeholders.sh --expect-template --staged >&2 || true
+  cat >&2 <<'EOF'
+
+pre-commit: the placeholder set changed.
+
+  Filling these in is correct on an INSTALL branch — commit with --no-verify.
+  On the template (main) it usually means a real Azure identifier is about to be
+  committed to a public repo. Check the diff above before overriding.
+EOF
+  exit 1
+fi

@@ -1,0 +1,41 @@
+# MinIO — in-cluster S3-compatible object storage.
+# Backing store for Loki (logs) and Thanos (long-term metrics). Backups do NOT
+# land here — Velero and CNPG write to the durable external Azure Blob account.
+#
+# Standalone mode (single replica) — fits the budget/single-node cluster.
+# The PVC size is deliberately a Standard SSD tier boundary (E4 = 32 GiB):
+# Azure rounds any in-between size UP to the next tier and bills for it, so
+# always request an exact tier (4/8/16/32/64/128/256... GiB).
+mode: standalone
+replicas: 1
+
+persistence:
+  enabled: true
+  storageClass: disk-standardssd
+  size: 32Gi          # E4 tier — do not use non-tier sizes
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+# Root credentials come from a pre-created Secret (Phase 1: manual;
+# Phase 2: migrated to an ExternalSecret from Key Vault via ESO).
+existingSecret: minio-root
+
+# Buckets (loki, thanos) are created by the separate `minio-buckets`
+# ArgoCD app (k8s/infra-manifest/minio-buckets/), NOT the chart's built-in
+# `buckets:` provisioning. The chart does it via a Helm post-install hook, which
+# ArgoCD maps to a PostSync hook that is skipped when MinIO can't sync cleanly on
+# first bring-up (before its ESO secret exists) — so the buckets never appear and
+# Thanos-store crash-loops. The standalone Job is reliable and idempotent.
+
+# No ingress for MinIO in the test round — accessed in-cluster only.
+# (A console/API ingress can be added later behind Traefik if needed.)
+
+# NOTE: the chart's own metrics.serviceMonitor is NOT used. Its template requires
+# `includeNode` as well as `enabled`, and hardcodes `release: {{ .Release.Name }}`
+# (= minio), which our Prometheus ignores (it selects release=kps). The monitor is
+# a plain manifest instead: k8s/infra-manifest/minio/servicemonitor.yaml

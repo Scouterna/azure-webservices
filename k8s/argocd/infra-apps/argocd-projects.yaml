@@ -1,0 +1,48 @@
+# Wave -1 — the AppProjects themselves, so editing one is a commit rather than a
+# kubectl apply. Everything else in infra-apps/ references a project by name, so
+# this must reconcile before them; -1 is ahead of the lowest wave in use (0).
+#
+# Bootstrap: `kubectl apply -f k8s/argocd/projects/` still happens ONCE in
+# install.md, because infra-root cannot sync an Application whose project does
+# not exist yet. This app adopts those objects afterwards and owns them from
+# then on — a later change to an AppProject reaches the cluster by push.
+#
+# prune is OFF: deleting an AppProject orphans every Application that references
+# it (they stop syncing and cannot be repaired without recreating the project),
+# so removing one stays a deliberate act.
+#
+# On a cluster where the bootstrap apply was CLIENT-side, the adopted objects
+# carry a last-applied-configuration annotation and a kubectl field manager;
+# ServerSideApply here takes ownership on first sync. Harmless, but it shows up
+# as a one-time diff on those objects.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-projects
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/argocd/projects
+    directory:
+      recurse: false
+      # Real AppProjects only. ArgoCD ignores non-.yaml files anyway, but state
+      # it so the *.yaml.example templates cannot be applied by accident — one
+      # of them would create an AppProject literally named "PROJECT".
+      include: '*.yaml'
+      exclude: '*.yaml.example'
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

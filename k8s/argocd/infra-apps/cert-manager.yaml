@@ -1,0 +1,35 @@
+# Wave 0 — cert-manager (CRDs + controller). ClusterIssuers are in cluster-infra
+# (also wave 0) and depend on these CRDs; the issuers' own sync retries until the
+# CRDs exist, so both landing in wave 0 is fine.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.21.0
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/k8s/infra-manifest/cert-manager/values.yaml
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

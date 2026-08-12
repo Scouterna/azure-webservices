@@ -1,0 +1,55 @@
+# Wave 2 — monitoring: kube-prometheus-stack + Loki + Alloy in one Application
+# (multi-source). Needs MinIO buckets (Loki + the Prometheus Thanos sidecar both
+# use MinIO) and the seeded secrets (grafana-admin, loki-minio, thanos-objstore).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 87.19.2
+      helm:
+        releaseName: kps
+        valueFiles:
+          - $values/k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml
+    # OSS Loki moved repos in March 2026: grafana/loki's chart became Grafana
+    # ENTERPRISE Logs (GEL) only at 7.0.0, and the OSS chart was forked to
+    # grafana-community (from 6.55.0, renumbered to 18.x). Do NOT "upgrade" to
+    # grafana.github.io 7.x — that switches this to the enterprise product.
+    # This is the OSS continuation; our values carried over unchanged.
+    - repoURL: https://grafana-community.github.io/helm-charts
+      chart: loki
+      targetRevision: 18.5.4
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/k8s/infra-manifest/monitoring/loki-values.yaml
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: 1.11.0
+      helm:
+        releaseName: alloy
+        valueFiles:
+          - $values/k8s/infra-manifest/monitoring/alloy-values.yaml
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true

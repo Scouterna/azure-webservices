@@ -1,0 +1,50 @@
+# Governance-by-observation: soft-threshold alerts.
+# These NOTIFY the infra group; they never block or enforce anything. They are
+# the trigger to *consider* a reactive LimitRange (see cluster-infra/monitor-limits),
+# not an automated action. Thresholds are intentionally generous.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: governance-observation
+  namespace: monitoring
+  labels:
+    release: kps          # picked up by the kube-prometheus-stack Prometheus
+spec:
+  groups:
+    - name: namespace-resource-share
+      rules:
+        - alert: NamespaceHighCPUShare
+          # A namespace using > 40% of total cluster CPU requests for 30m.
+          expr: |
+            sum by (namespace) (kube_pod_container_resource_requests{resource="cpu"})
+              / ignoring(namespace) group_left sum(kube_node_status_allocatable{resource="cpu"})
+              > 0.40
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} requests a large share of cluster CPU"
+            description: "{{ $labels.namespace }} has requested >40% of allocatable CPU for 30m. Consider whether it is starving other projects (reactive LimitRange available)."
+        - alert: NamespaceHighMemoryShare
+          expr: |
+            sum by (namespace) (kube_pod_container_resource_requests{resource="memory"})
+              / ignoring(namespace) group_left sum(kube_node_status_allocatable{resource="memory"})
+              > 0.40
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} requests a large share of cluster memory"
+            description: "{{ $labels.namespace }} has requested >40% of allocatable memory for 30m. Consider a reactive LimitRange if it is impacting other projects."
+    - name: persistent-volume-fill
+      rules:
+        - alert: PersistentVolumeFillingUp
+          # A PV over 85% full for 15m.
+          expr: |
+            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is >85% full"
+            description: "Expand the PVC (StandardSSD supports online expansion; keep the new size on an exact tier) or clear data."

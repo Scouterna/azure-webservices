@@ -1,0 +1,17 @@
+# VolumeSnapshotClass for the Azure disk CSI driver.
+#
+# Velero runs with --features=EnableCSI and its schedules use snapshotVolumes:
+# true, but CSI volume snapshots only happen if a VolumeSnapshotClass carries the
+# label `velero.io/csi-volumesnapshot-class: "true"`. Without this, Velero backs
+# up namespace/object state but NOT the PVC data — so this class is what makes
+# project PVC backups actually capture volume contents.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: disk-snapshot
+  labels:
+    velero.io/csi-volumesnapshot-class: "true"
+driver: disk.csi.azure.com
+# Retain: deleting the VolumeSnapshot k8s object does not delete the underlying
+# Azure snapshot until Velero's own retention (backup ttl) removes it.
+deletionPolicy: Retain

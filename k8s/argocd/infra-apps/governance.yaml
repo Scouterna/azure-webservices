@@ -1,0 +1,27 @@
+# Wave 4 — governance-by-observation: the soft-threshold PrometheusRule and the
+# per-namespace Grafana dashboard (a labeled ConfigMap the Grafana sidecar loads).
+# Wave 4 so it lands after monitoring (wave 2) exists.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: governance
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/monitoring/governance
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

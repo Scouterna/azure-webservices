@@ -1,0 +1,21 @@
+# AppProject for the cluster's own infrastructure / common services.
+# Permissive by design: infra apps pull remote Helm charts (any source repo)
+# and create cluster-scoped resources (StorageClasses, CRDs, ClusterIssuers).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infra
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Cluster infrastructure and common services (owned by the infra group)
+  sourceRepos:
+    - '*'
+  destinations:
+    - name: '*'
+      namespace: '*'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'

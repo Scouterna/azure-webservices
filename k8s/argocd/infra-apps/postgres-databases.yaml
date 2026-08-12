@@ -1,0 +1,34 @@
+# Wave 3 — per-project databases and roles on the shared server. Separate from
+# the `postgres` app so adding a project's database is a small, reviewable commit
+# that cannot alter the server itself, and wave 3 so the Cluster is up first.
+#
+# prune is FALSE: removing a project's file must not drop its database. Retiring
+# a database is deliberate — set `ensure: absent`, or delete it by hand after
+# taking a final backup (docs/postgres.md).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres-databases
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/postgres/databases
+    directory:
+      exclude: '_template.yaml.example'
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

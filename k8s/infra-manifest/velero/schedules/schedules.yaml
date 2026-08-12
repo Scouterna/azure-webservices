@@ -1,0 +1,50 @@
+# Velero backup schedules. Strategy: docs/maintenance.md ("Backup strategy").
+---
+# Daily backup of project namespaces (anything NOT infra). 14-day retention.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-projects
+  namespace: velero
+spec:
+  schedule: "0 2 * * *" # 02:00 daily
+  template:
+    ttl: 336h # 14 days
+    includedNamespaces:
+      - "*"
+    excludedNamespaces:
+      # Keep in step with the destinations in k8s/argocd/infra-apps/ — a missing
+      # namespace here is silently swept into the daily project backup.
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - argocd
+      - cert-manager
+      - traefik
+      - minio
+      - monitoring
+      - cnpg-system
+      - external-secrets
+      - headlamp
+      - velero
+      - dex
+      - sealed-secrets
+      # Has its own CNPG ScheduledBackup at 02:30; still in weekly-full.
+      - postgres
+    snapshotVolumes: true
+    storageLocation: default
+---
+# Weekly full-cluster backup (all namespaces incl. infra) — safety net. 5 weeks.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-full
+  namespace: velero
+spec:
+  schedule: "0 3 * * 0" # 03:00 Sundays
+  template:
+    ttl: 840h # 35 days
+    includedNamespaces:
+      - "*"
+    snapshotVolumes: true
+    storageLocation: default

@@ -1,0 +1,12 @@
+# Changes under these paths require review from the Webservices Infra team.
+# https://github.com/orgs/Scouterna/teams/webservices-infra
+
+# Cluster state — anything here changes what ArgoCD applies.
+/k8s/                   @Scouterna/webservices-infra
+
+# Cluster provisioning and monitoring stack.
+/infra/                 @Scouterna/webservices-infra
+/monitoring/            @Scouterna/webservices-infra
+
+# CI and repo policy.
+/.github/               @Scouterna/webservices-infra

@@ -1,0 +1,76 @@
+# Connection details for this project's databases on the SHARED Postgres server —
+# dev + prod, the default. One ExternalSecret per namespace, each pointing at
+# that environment's own database and role.
+#
+# The databases and roles themselves are infra-owned and live in
+# k8s/infra-manifest/postgres/databases/ — CNPG's Database/DatabaseRole must sit
+# in the shared cluster's namespace (spec.cluster takes a name, not a namespace).
+# This file only materializes the credentials into the project's namespaces.
+#
+# Prereqs (see docs/onboarding.md → "Add a database"):
+#   - infra has committed k8s/infra-manifest/postgres/databases/PROJECT.yaml
+#   - both passwords are in Key Vault as postgres-PROJECT-dev-password and
+#     postgres-PROJECT-prod-password
+#
+# ONE environment only? Delete the prod block and drop the `-dev` suffix in what
+# remains (and do the same on the infra side). ADDING staging? Copy a block.
+#
+# A project that needs its OWN Postgres instance instead (heavy load, a
+# different major version, an extension the shared server does not carry) can
+# create a CNPG Cluster in this namespace — see docs/postgres.md.
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: PROJECT-db
+  namespace: PROJECT-dev
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    name: azure-kv
+    kind: ClusterSecretStore
+  target:
+    name: PROJECT-db
+    template:
+      type: Opaque
+      data:
+        # Individual fields, plus a ready-made URL for libraries that want one.
+        # The password lands in `uri` UNENCODED: generate it alphanumeric-only,
+        # or a reserved character (@ : / % #) breaks the URI while the
+        # individual fields still work.
+        host: shared-rw.postgres.svc.cluster.local
+        port: "5432"
+        dbname: PROJECT-dev
+        username: PROJECT-dev
+        password: "{{ .password }}"
+        uri: "postgresql://PROJECT-dev:{{ .password }}@shared-rw.postgres.svc.cluster.local:5432/PROJECT-dev"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: postgres-PROJECT-dev-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: PROJECT-db
+  namespace: PROJECT-prod
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    name: azure-kv
+    kind: ClusterSecretStore
+  target:
+    name: PROJECT-db
+    template:
+      type: Opaque
+      data:
+        host: shared-rw.postgres.svc.cluster.local
+        port: "5432"
+        dbname: PROJECT-prod
+        username: PROJECT-prod
+        password: "{{ .password }}"
+        uri: "postgresql://PROJECT-prod:{{ .password }}@shared-rw.postgres.svc.cluster.local:5432/PROJECT-prod"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: postgres-PROJECT-prod-password

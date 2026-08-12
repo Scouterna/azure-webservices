@@ -1,0 +1,66 @@
+# Headlamp — plain manifests, not the Helm chart: the chart cannot take an
+# ESO-supplied OIDC client secret without committing it. Verify per §11.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: headlamp
+  namespace: headlamp
+  labels:
+    app.kubernetes.io/name: headlamp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: headlamp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: headlamp
+    spec:
+      serviceAccountName: headlamp
+      containers:
+        - name: headlamp
+          image: ghcr.io/headlamp-k8s/headlamp:v0.41.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-in-cluster"
+            - "-in-cluster-context-name=main"
+            - "-plugins-dir=/headlamp/plugins"
+            - "-session-ttl=86400"
+            - "-oidc-client-id=headlamp"
+            - "-oidc-idp-issuer-url=https://dex.wsinfra.scouterna.net"
+            # offline_access: refresh token. groups: GitHub teams for RBAC.
+            - "-oidc-scopes=openid,profile,email,offline_access,groups"
+            - "-oidc-callback-url=https://headlamp.wsinfra.scouterna.net/oidc-callback"
+            # $(VAR) is expanded by the kubelet from `env` below, not a shell.
+            - "-oidc-client-secret=$(OIDC_CLIENT_SECRET)"
+          env:
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: headlamp-oidc
+                  key: clientSecret
+          ports:
+            - name: http
+              containerPort: 4466
+              protocol: TCP
+          # /config is a backend route; / is the static frontend and always 200s.
+          # Still not a full health check — see docs/install.md §11.
+          livenessProbe:
+            httpGet:
+              path: /config
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /config
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

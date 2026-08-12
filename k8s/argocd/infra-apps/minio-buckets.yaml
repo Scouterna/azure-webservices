@@ -1,0 +1,35 @@
+# Wave 1 — creates the MinIO buckets (loki, thanos) that Loki and Thanos
+# consume. Separate from the minio app because the min.io chart's built-in
+# bucket hook (a Helm post-install hook) is unreliable under ArgoCD — see the
+# comment in create-buckets-job.yaml. Same wave as minio: the Job self-waits for
+# MinIO to answer (mc alias retry loop), so it doesn't matter which finishes
+# first, and the buckets exist before wave-2 monitoring (Loki) / wave-3 Thanos.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: minio-buckets
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: minio
+  source:
+    repoURL: https://github.com/Scouterna/azure-webservices.git
+    targetRevision: main
+    path: k8s/infra-manifest/minio-buckets
+    directory:
+      recurse: true
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      # A Job's pod template is immutable; Replace=true lets a changed spec
+      # recreate the Job instead of failing on an in-place update.
+      - Replace=true

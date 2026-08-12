@@ -1,0 +1,18 @@
+# CloudNativePG operator — manages PostgreSQL clusters as CRs.
+# Operator only here; the shared server lives in k8s/infra-manifest/postgres/.
+# Backups go to the durable EXTERNAL Azure Blob account via the Barman Cloud
+# Plugin (cnpg-shared container) — not to the in-cluster MinIO.
+replicaCount: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    memory: 256Mi
+
+# Operator metrics. CNPG uses a PodMonitor (not a ServiceMonitor); Prometheus's
+# podMonitorSelector uses the same release=kps label.
+monitoring:
+  podMonitorEnabled: true
+  podMonitorAdditionalLabels:
+    release: kps

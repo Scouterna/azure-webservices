@@ -1,0 +1,20 @@
+# Reactive LimitRange — apply to a SPECIFIC misbehaving namespace only.
+# Sets per-container defaults and caps so no single pod can grab the node.
+# Edit NAMESPACE and the numbers, then: kubectl apply -f limitrange.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: reactive-limits
+  namespace: NAMESPACE
+spec:
+  limits:
+    - type: Container
+      default:            # applied if a container sets no limit
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:     # applied if a container sets no request
+        cpu: 50m
+        memory: 64Mi
+      max:                # a container may not exceed this
+        cpu: "2"
+        memory: 2Gi

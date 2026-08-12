@@ -1,0 +1,41 @@
+# === Secrets & environment-specific values (NEVER commit — this is a PUBLIC repo) ===
+# Note: infra/env/*.bicepparam is committed — it holds no secrets (cluster shape
+# only; the subscription is selected via `az account set` / the resource group).
+
+# Kubeconfigs and cluster credentials
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+.kube-*
+
+# Local env / secret material that might be generated during bootstrap
+.env
+.env.*
+!.env.example
+*-secret.yaml
+*-secret.yml
+*.secret.yaml
+secrets.yaml
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Azure CLI / Terraform-style local state (in case anything leaks in)
+.azure/
+*.tfvars
+*.tfstate
+*.tfstate.*
+
+# === Editor / OS cruft ===
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Cluster secret/config dumps (never commit)
+scoutview.env
+*.env

@@ -1,0 +1,124 @@
+alloy:
+  enableReporting: false
+  mounts:
+    varlog: true
+  resources:
+    requests:
+      cpu: 20m
+      memory: 80Mi
+    limits:
+      memory: 220Mi
+  configMap:
+    content: |
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+      }
+
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_phase"]
+          regex = "Succeeded|Failed"
+          action = "drop"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          action        = "replace"
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          action        = "replace"
+          target_label  = "pod_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          action        = "replace"
+          target_label  = "container_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          replacement   = "/var/log/pods/*$1/*.log"
+          target_label  = "__path__"
+          action        = "replace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          action        = "replace"
+          target_label  = "app_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          replacement   = "$1/$2"
+          target_label  = "job"
+          action        = "replace"
+        }
+      }
+
+      loki.source.kubernetes "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.process.add_labels.receiver]
+      }
+
+      loki.process "add_labels" {
+        stage.cri {}
+
+        stage.static_labels {
+          values = {
+            cluster = "webservices-v2",
+          }
+        }
+
+        stage.labels {
+          values = {
+            logger = "logger",
+          }
+        }
+
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.source.kubernetes_events "cluster_events" {
+        job_name   = "integrations/kubernetes/eventhandler"
+        log_format = "logfmt"
+        forward_to = [
+          loki.process.cluster_events.receiver,
+        ]
+      }
+
+      loki.process "cluster_events" {
+        forward_to = [loki.write.default.receiver]
+
+        // cluster must match the pod-log pipeline above.
+        stage.static_labels {
+          values = {
+            cluster = "webservices-v2",
+          }
+        }
+
+        stage.labels {
+          values = {
+            kubernetes_cluster_events = "job",
+          }
+        }
+      }
+
+controller:
+  type: daemonset
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+service:
+  enabled: false

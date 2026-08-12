@@ -1,0 +1,51 @@
+# Sealed Secrets controller (bitnami-labs/sealed-secrets).
+#
+# Lets a project commit an ENCRYPTED SealedSecret to Git; the controller decrypts
+# it into a native Secret in the same namespace. Fully self-service per secret —
+# a developer seals with `kubeseal` and commits; no infra action per secret. This
+# is the commit-safe, self-service complement to ESO+Key Vault (which needs infra
+# to `az keyvault secret set` each value). See docs/onboarding.md "Secrets".
+#
+# NOTE ON THE IMAGE: this is the upstream OSS project (github.com/bitnami-labs/
+# sealed-secrets), NOT the retired Bitnami/VMware application catalog. Its image
+# `docker.io/bitnami/sealed-secrets-controller` is still published and pulls fine
+# (verified 2026-07) — the "Bitnami charts dead" caveat does not apply here. We
+# keep the chart default rather than repointing the registry.
+
+# Fixed name so `kubeseal` and RBAC can find the controller/service predictably.
+fullnameOverride: sealed-secrets-controller
+
+# --- Durable sealing key (survives cluster rebuilds) ---------------------------
+# The controller normally GENERATES its own RSA private key on first start and
+# self-rotates it every 30 days. A rebuilt cluster would then mint a BRAND-NEW
+# key, making every committed SealedSecret undecryptable. To avoid that, the key
+# lives in the durable Key Vault and ESO materializes it (labelled `active`) into
+# this namespace BEFORE the controller starts (sync-waves: key ExternalSecret in
+# wave 1, this controller in wave 2). The controller then ADOPTS that key.
+#
+# Because we pin the key, we DISABLE auto-rotation (keyrenewperiod=0): a rotated
+# key the controller minted itself would not be back in Key Vault, reintroducing
+# the rebuild problem. Rotation, if ever needed, is a deliberate manual op that
+# also updates the Key Vault secret. See docs/install.md.
+keyrenewperiod: "0"   # "0" (quoted!) disables automatic key rotation
+
+# Modest footprint for a shared, budget cluster.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# Expose controller metrics to the shared Prometheus (kube-prometheus-stack).
+metrics:
+  serviceMonitor:
+    enabled: true
+    namespace: sealed-secrets
+    # REQUIRED: Prometheus only selects release=kps; without it, no metrics and
+    # no error.
+    labels:
+      release: kps
+
+# The chart installs the SealedSecret CRD.
+# (crds are installed by default; kept explicit for clarity.)

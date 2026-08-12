@@ -1,0 +1,54 @@
+# Wave 4 — Velero: backups to durable EXTERNAL Azure Blob, via Workload Identity.
+#
+# The <...> values are Azure identifiers (not secrets) — fill them per
+# docs/install.md §9. Unfilled, they reach Helm literally and Velero fails at
+# runtime, not at sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: velero
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: velero
+  sources:
+    - repoURL: https://vmware-tanzu.github.io/helm-charts
+      chart: velero
+      targetRevision: 12.1.0
+      helm:
+        releaseName: velero
+        valueFiles:
+          - $values/k8s/infra-manifest/velero/values.yaml
+        parameters:
+          - name: serviceAccount.server.annotations.azure\.workload\.identity/client-id
+            value: <VELERO_CLIENT_ID>
+          - name: configuration.backupStorageLocation[0].config.storageAccount
+            value: <BACKUP_STORAGE_ACCOUNT>
+          - name: configuration.backupStorageLocation[0].config.resourceGroup
+            value: webservices-infra
+          - name: configuration.backupStorageLocation[0].config.subscriptionId
+            value: <SUBSCRIPTION_ID>
+          - name: configuration.volumeSnapshotLocation[0].config.resourceGroup
+            value: <NODE_RESOURCE_GROUP>
+          - name: configuration.volumeSnapshotLocation[0].config.subscriptionId
+            value: <SUBSCRIPTION_ID>
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      ref: values
+    # Schedules applied from the repo path (same namespace).
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      path: k8s/infra-manifest/velero/schedules
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

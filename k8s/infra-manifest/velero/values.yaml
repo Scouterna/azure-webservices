@@ -1,0 +1,81 @@
+# Velero — cluster/namespace backups to EXTERNAL Azure Blob (durable,
+# decoupled from the in-cluster MinIO). Authenticates via Workload Identity
+# (the velero ServiceAccount federates to a managed identity) — no keys.
+#
+# The managed identity needs TWO roles on the storage account:
+#   - Storage Blob Data Contributor  (data plane: read/write backup blobs)
+#   - Reader                         (mgmt plane: Microsoft.Storage/.../read —
+#                                     the Azure plugin fetches account properties;
+#                                     without it the BSL validates but backups
+#                                     stall with 403 AuthorizationFailed)
+#
+# Storage account / container / identity are environment-specific and injected
+# at install time via --set (they are Azure identifiers, not secrets, kept out
+# of the committed file):
+#   configuration.backupStorageLocation[0].bucket   = velero
+#   configuration.backupStorageLocation[0].config.storageAccount = <account>
+#   credentials.* / serviceAccount annotation clientId = <VELERO_CLIENT_ID>
+
+initContainers:
+  - name: velero-plugin-for-microsoft-azure
+    image: velero/velero-plugin-for-microsoft-azure:v1.12.0
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+
+# Workload Identity: label the pod and annotate the SA (clientId via --set).
+podLabels:
+  azure.workload.identity/use: "true"
+serviceAccount:
+  server:
+    create: true
+    name: velero
+    # annotations."azure.workload.identity/client-id" set via --set at install.
+
+# Back up API state + PV snapshots (CSI, enabled below); no file-system
+# node-agent.
+deployNodeAgent: false
+
+credentials:
+  # Workload Identity => no secret file needed. useSecret false avoids the chart
+  # creating an empty credentials secret.
+  useSecret: false
+
+configuration:
+  # CSI volume snapshots for PV data (Azure Disk CSI supports snapshots).
+  # Requires a VolumeSnapshotClass labeled velero.io/csi-volumesnapshot-class
+  # (shipped in cluster-infra). Without it, PV data is not snapshotted but the
+  # API-object backup still works.
+  features: EnableCSI
+  backupStorageLocation:
+    - name: default
+      provider: azure
+      bucket: velero # the blob container
+      default: true
+      config:
+        # storageAccount + resourceGroup + subscriptionId injected via --set
+        # (Azure identifiers, kept out of the committed file for the public repo).
+        useAAD: "true"
+  volumeSnapshotLocation:
+    - name: default
+      provider: azure
+      config:
+        resourceGroup: "" # node RG for disk snapshots — set via --set
+        subscriptionId: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Prometheus metrics (backup success/failure, duration). autodetect would look
+# for the CRD at render time, which is unreliable under ArgoCD — set explicitly.
+metrics:
+  enabled: true
+  serviceMonitor:
+    autodetect: false
+    enabled: true
+    additionalLabels:
+      release: kps

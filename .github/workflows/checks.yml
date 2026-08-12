@@ -1,0 +1,37 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  placeholders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # main is the TEMPLATE: the placeholders belong here. This fails if a real
+      # Azure identifier is committed over one, or a placeholder is deleted.
+      - name: Placeholder template intact
+        run: scripts/check-placeholders.sh --expect-template
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: YAML parses
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+          files = sorted(pathlib.Path('k8s').rglob('*.y*ml'))
+          bad = []
+          for p in files:
+              try:
+                  list(yaml.safe_load_all(p.read_text()))
+              except yaml.YAMLError as e:
+                  bad.append(f"{p}: {e}")
+          print(f"parsed {len(files)} files")
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY
