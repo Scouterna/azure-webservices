@@ -1,4 +1,5 @@
-# Wave 0 — raw cluster manifests: StorageClasses + cert-manager ClusterIssuers.
+# Wave 0 — raw cluster manifests: StorageClasses, cert-manager ClusterIssuers,
+# and cluster-wide network policy.
 # Plain kubectl-style manifests (a directory source), not a Helm chart.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
