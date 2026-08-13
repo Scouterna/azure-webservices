@@ -35,3 +35,44 @@ jobs:
               print('\n'.join(bad), file=sys.stderr)
               sys.exit(1)
           PY
+
+  pod-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Project developers hold ClusterRole `admin`, which permits any
+      # securityContext. Pod Security Admission is what stops that becoming a
+      # node takeover, and it is applied per namespace by LABEL — so a project
+      # namespace committed without the label is unprotected, with no error and
+      # nothing in the cluster to notice. Assert the labels here instead.
+      - name: Project namespaces enforce Pod Security
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+
+          ALLOWED = {'baseline', 'restricted'}   # 'privileged' is not a level we ship
+          bad, checked = [], 0
+
+          for p in sorted(pathlib.Path('k8s/projects').rglob('namespace*.y*ml')):
+              for doc in yaml.safe_load_all(p.read_text()):
+                  if not doc or doc.get('kind') != 'Namespace':
+                      continue
+                  checked += 1
+                  labels = (doc.get('metadata') or {}).get('labels') or {}
+                  level = labels.get('pod-security.kubernetes.io/enforce')
+                  if level is None:
+                      bad.append(f"{p}: no pod-security.kubernetes.io/enforce label")
+                  elif level not in ALLOWED:
+                      bad.append(f"{p}: enforce={level!r}, want one of {sorted(ALLOWED)}")
+                  if not labels.get('pod-security.kubernetes.io/enforce-version'):
+                      bad.append(f"{p}: enforce-version must be pinned, not left to track latest")
+
+          print(f"checked {checked} project namespace(s)")
+          if not checked:
+              print("no project namespaces found — the template must still be present",
+                    file=sys.stderr)
+              sys.exit(1)
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY

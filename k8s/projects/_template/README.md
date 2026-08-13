@@ -10,7 +10,10 @@ project's own workload manifests never live here — see §B.
 Layer 1 — the things a project cannot create for itself. The `project-infra`
 ApplicationSet syncs this `infra/` directory automatically once committed.
 
-- `namespace-dev.yaml`, `namespace-prod.yaml` — the project's namespace(s).
+- `namespace-dev.yaml`, `namespace-prod.yaml` — the project's namespace(s). They
+  carry the Pod Security Admission labels that stop a pod in this namespace from
+  reaching the node; keep them when you copy, and see `docs/onboarding.md` §C for
+  what they forbid. CI rejects a project namespace committed without them.
 - `developer-rbac.yaml.example` → rename to `developer-rbac.yaml`. Binds a
   GitHub team (or user) to `admin` within the project's namespaces.
 - `database.yaml.example` → rename to `database.yaml` if the project needs a
