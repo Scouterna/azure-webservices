@@ -6,9 +6,7 @@ metadata:
   labels:
     scouterna.se/project: PROJECT
     scouterna.se/env: prod
-    # See namespace-dev.yaml for why these are here. Same level in both
-    # environments on purpose: a pod that cannot run in dev must not first
-    # succeed in prod.
+    # Same level as dev on purpose — see docs/security.md.
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/warn: restricted

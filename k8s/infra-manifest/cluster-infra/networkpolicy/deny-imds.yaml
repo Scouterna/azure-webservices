@@ -1,33 +1,19 @@
-# Deny pod egress to the Azure Instance Metadata Service (IMDS).
-#
-# IMDS at 169.254.169.254 answers unauthenticated HTTP from any pod on the node
-# and issues tokens for the *node's* kubelet identity, which belongs to no
-# namespace — so any pod that reaches it escalates out of its own namespace.
-# kube-system is carved out because the AKS system components and the Key Vault
-# CSI provider legitimately use the node identity. Nothing else needs IMDS:
-# External Secrets and Velero use Workload Identity, CNPG's backups use a
-# storage-account key, and the rest talk only in-cluster.
-#
-# Verify enforcement after a rebuild — see docs/install.md §11, "IMDS is
-# blocked". A policy that silently failed to apply is worse than none, and you
-# cannot tell which happened from this file.
+# Deny pod egress to Azure IMDS (169.254.169.254) outside kube-system.
+# Rationale and the kube-system carve-out: docs/security.md.
+# Verify enforcement after a rebuild — Synced does not mean enforced: install.md §11.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
   name: deny-imds-egress
 spec:
   description: Deny egress to Azure IMDS (169.254.169.254) from all pods outside kube-system
-  # A denylist on purpose: a namespace created later is denied by default, so a
-  # new infra component needing the node identity fails visibly at deploy time
-  # rather than a new project namespace quietly keeping the escalation path.
   endpointSelector:
     matchExpressions:
       - key: k8s:io.kubernetes.pod.namespace
         operator: NotIn
         values:
           - kube-system
-  # Add the deny rule WITHOUT putting the selected endpoints into default-deny
-  # egress. Removing this turns a targeted deny into a cluster-wide outage.
+  # Removing this turns a targeted deny into a cluster-wide egress outage.
   enableDefaultDeny:
     egress: false
     ingress: false

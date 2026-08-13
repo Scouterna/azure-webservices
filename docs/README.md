@@ -8,6 +8,7 @@
 | [maintenance.md](maintenance.md) | Version pins, upgrade cadences, and how to keep the platform current. |
 | [postgres.md](postgres.md) | The shared PostgreSQL design: why one server, what isolation it gives, and when a project should get its own instance. |
 | [certificates.md](certificates.md) | How TLS is issued (HTTP-01 today), and the **proposal** to add DNS-01 per zone for wildcards — with the credential question that decides it. |
+| [security.md](security.md) | Namespace isolation: why pod egress to Azure IMDS is denied and why project namespaces enforce baseline Pod Security — plus what neither covers. |
 
 ## What the cluster is
 

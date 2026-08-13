@@ -6,16 +6,9 @@ metadata:
   labels:
     scouterna.se/project: PROJECT
     scouterna.se/env: dev
-    # Pod Security Admission. Developers hold ClusterRole `admin` here, which
-    # permits any securityContext — without these labels a privileged or hostPath
-    # pod is accepted, and on a single-node cluster that owns the node running
-    # the whole platform. `baseline` blocks that class of pod (privileged, host
-    # namespaces, hostPath, hostPort, added capabilities).
-    #
-    # enforce is pinned to the cluster's minor so an AKS upgrade cannot silently
-    # change what is accepted; bump it deliberately (docs/maintenance.md).
-    # warn/audit run `restricted` unpinned, so projects see what a future
-    # tightening would require without anything breaking today.
+    # Pod Security Admission — without these the namespace is unprotected and
+    # nothing reports it. Rationale: docs/security.md. Bumping enforce-version
+    # after an AKS upgrade: docs/maintenance.md.
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/warn: restricted
