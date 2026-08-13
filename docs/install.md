@@ -895,8 +895,9 @@ kubectl run imds-probe --rm -it --restart=Never -n <project-ns> \
   'http://169.254.169.254/metadata/instance?api-version=2021-02-01'
 ```
 
-The probe must **time out** (`curl` exit 28). A JSON document means the policy is
-not being enforced — check the CRD exists and that `cluster-infra` synced it.
+The probe must exit **28** (timeout). Anything else is **not** a pass: a JSON
+document means the policy is not being enforced — check the CRD exists and that
+`cluster-infra` synced it — and any other failure means the probe never ran.
 
 Then confirm the Azure-authenticating components still work, since they must be
 using Workload Identity rather than the node identity:
