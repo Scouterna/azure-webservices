@@ -310,6 +310,23 @@ Grafana keeps its old config until the pod restarts.
 Layer 2 belongs to the project. There are exactly **two routes**, and neither
 puts your workload manifests in the infra repo.
 
+> **Your namespaces enforce the `baseline` Pod Security Standard,** by both
+> routes. The API server **rejects** a pod that is `privileged`, uses host
+> namespaces (`hostNetwork`, `hostPID`, `hostIPC`), mounts a `hostPath` volume,
+> claims a `hostPort`, or adds capabilities beyond the default set — the node is
+> shared with every other project and the platform itself, so nothing that
+> reaches it is available to a workload. Ordinary containers, including ones
+> running as root, are unaffected.
+>
+> You will also see **warnings** citing `restricted` (run as non-root, drop all
+> capabilities, `seccompProfile: RuntimeDefault`). Those are advisory — the pod
+> is admitted. They show what a future tightening would ask for, so treat them as
+> a to-do list rather than an error.
+>
+> If your workload genuinely needs something `baseline` forbids, talk to infra
+> before working around it. The answer is usually a different way to get the same
+> result; where it is not, the namespace label is infra's to change.
+
 ### C1. By hand (the default)
 
 `helm install` / `kubectl apply` with your own credentials, in your own

@@ -82,6 +82,21 @@ Thanos, Headlamp.
   (check `az aks get-versions -l <region>`). On a single-node cluster the
   upgrade is briefly disruptive — expect a short control-plane/node blip.
 
+**A minor upgrade leaves Pod Security behind.** Project namespaces pin
+`pod-security.kubernetes.io/enforce-version` (see
+`k8s/projects/_template/infra/namespace-*.yaml`), which is deliberate — the
+cluster's admission rules should not change underneath running workloads because
+the control plane moved. The cost is that the pin does not follow the upgrade:
+after moving to `1.37` the namespaces still enforce `1.36` semantics, silently,
+and any policy tightening in the new minor is not applied.
+
+So bump the pin as a **separate, later commit** — cluster first, verify, then the
+labels. The `warn`/`audit` labels are intentionally left unpinned, so between the
+two the warnings already show what the newer level would enforce. Every project
+namespace carries the pin; `.github/workflows/checks.yml` fails a project
+namespace committed without one, but it cannot tell a stale pin from a current
+one.
+
 ## Backup strategy (Velero)
 
 Two schedules in `k8s/infra-manifest/velero/schedules/schedules.yaml`, writing to

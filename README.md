@@ -63,7 +63,7 @@ with a Premium class available opt-in.
 
 | Service | What it does | Chart |
 |---|---|---|
-| **cluster-infra** | StorageClasses + cert-manager ClusterIssuers | raw manifests |
+| **cluster-infra** | StorageClasses, cert-manager ClusterIssuers, cluster-wide NetworkPolicy | raw manifests |
 | **cert-manager** | TLS certificates (Let's Encrypt) | `cert-manager` v1.21.0 |
 | **Traefik** | Ingress controller (default class) + LoadBalancer | `traefik` 41.0.2 |
 | **MinIO** | S3-compatible object storage | `minio` 5.4.0 |

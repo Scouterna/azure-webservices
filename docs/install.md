@@ -877,6 +877,40 @@ install: either the `backup-storage-account-key` secret is missing from Key Vaul
 (§5) or the `cnpg-shared` container does not exist. Both leave the database up
 and unbacked-up, and neither raises an alert.
 
+### IMDS is blocked
+
+`deny-imds-egress` (wave 0, in `cluster-infra`) denies egress to the Azure
+Instance Metadata Service from every namespace except `kube-system`, closing the
+path where any pod mints tokens for the node's kubelet identity. **An unenforced
+policy looks identical to an enforced one in `get applications`** — the app is
+`Synced` either way, because the object exists. Probe it:
+
+```bash
+kubectl get crd ciliumclusterwidenetworkpolicies.cilium.io   # CRD present at all
+kubectl get ciliumclusterwidenetworkpolicies deny-imds-egress
+
+kubectl run imds-probe --rm -it --restart=Never -n <project-ns> \
+  --image=curlimages/curl:latest -- \
+  curl -sS -m 5 -H 'Metadata:true' \
+  'http://169.254.169.254/metadata/instance?api-version=2021-02-01'
+```
+
+The probe must exit **28** (timeout). Anything else is **not** a pass: a JSON
+document means the policy is not being enforced — check the CRD exists and that
+`cluster-infra` synced it — and any other failure means the probe never ran.
+
+Then confirm the Azure-authenticating components still work, since they must be
+using Workload Identity rather than the node identity:
+
+```bash
+kubectl get externalsecrets -A                  # READY True, still refreshing
+kubectl -n velero get backupstoragelocation default   # -> Available
+```
+
+If an `ExternalSecret` starts failing only *after* this policy applies, it was
+silently falling back to the node identity through IMDS — fix the federated
+credential (§8), don't widen the policy.
+
 ### Dual-stack DNS
 
 The cluster is dual-stack, so the Traefik LoadBalancer has **both** an IPv4 and an
