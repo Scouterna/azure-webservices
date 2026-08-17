@@ -144,10 +144,15 @@ RBAC half above is the load-bearing fix and the conditions are defence in depth.
 
 **Why the label is opt-in per environment.** A namespace with no database gets no
 vault access at all, and granting it is a visible one-line change next to the
-`database.yaml` that needs it. The failure mode if it is forgotten is a stalled
-`ExternalSecret` — invisible until someone looks, and nothing alerts yet — so
-`.github/workflows/checks.yml` fails a project namespace that consumes the store
-without carrying the label.
+`database.yaml` that needs it.
+
+Every way of getting this wrong ends in the same place — a stalled
+`ExternalSecret`, invisible until someone looks, and nothing alerts on it yet — so
+`.github/workflows/checks.yml` asserts the whole chain rather than one link of it:
+that a store named `azure-kv` exists at all (every `ExternalSecret` here
+references it *by name*, so a rename breaks all of them), that it has
+`conditions`, that those conditions carry a selector matching the label, and that
+every namespace consuming it is permitted by one clause or the other.
 
 ## Known limits
 
