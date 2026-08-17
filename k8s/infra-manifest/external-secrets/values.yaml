@@ -7,6 +7,12 @@
 # not a secret, but kept out of the committed file so this stays cluster-agnostic).
 installCRDs: true
 
+# Never aggregate ESO write access into admin/edit — project developers hold
+# `admin`. Read-only stays on. docs/security.md §3.
+rbac:
+  aggregateToAdmin: false
+  aggregateToEdit: false
+
 # Label the pods for Azure Workload Identity, and annotate the SA with the
 # managed identity's client ID.
 serviceAccount:

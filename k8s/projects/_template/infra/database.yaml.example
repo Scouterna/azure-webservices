@@ -11,6 +11,8 @@
 #   - infra has committed k8s/infra-manifest/postgres/databases/PROJECT.yaml
 #   - both passwords are in Key Vault as postgres-PROJECT-dev-password and
 #     postgres-PROJECT-prod-password
+#   - each namespace here carries scouterna.se/keyvault-access: "true", or the
+#     store refuses it and these never sync (CI fails on it; docs/security.md)
 #
 # ONE environment only? Delete the prod block and drop the `-dev` suffix in what
 # remains (and do the same on the infra side). ADDING staging? Copy a block.

@@ -74,3 +74,117 @@ jobs:
               print('\n'.join(bad), file=sys.stderr)
               sys.exit(1)
           PY
+
+  secret-store-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The store's identity can read the WHOLE vault, so which namespaces may use
+      # it is the only limit. Every way of breaking that ends as a stalled
+      # ExternalSecret, which nothing alerts on. See docs/security.md.
+      - name: ClusterSecretStore is scoped, and every consumer is permitted by it
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+
+          STORE = 'azure-kv'
+          LABEL = 'scouterna.se/keyvault-access'
+          # Only these filenames are synced by the project-infra ApplicationSet;
+          # *.example reference files are deliberately ignored.
+          SYNCED = ('namespace.yaml', 'developer-rbac.yaml', 'database.yaml')
+          bad = []
+
+          def synced(p):
+              return p.name in SYNCED or p.name.startswith(('namespace-', 'sealedsecret-'))
+
+          # Index every ClusterSecretStore BY NAME. Checking "some store exists"
+          # would pass if the one ExternalSecrets reference were renamed away.
+          stores = {}
+          for p in sorted(pathlib.Path('k8s/infra-manifest').rglob('*.y*ml')):
+              for doc in yaml.safe_load_all(p.read_text()):
+                  if not doc or doc.get('kind') != 'ClusterSecretStore':
+                      continue
+                  conds = (doc.get('spec') or {}).get('conditions') or []
+                  named, by_label = set(), False
+                  for c in conds:
+                      named |= set(c.get('namespaces') or [])
+                      sel = (c.get('namespaceSelector') or {}).get('matchLabels') or {}
+                      if sel.get(LABEL) == 'true':
+                          by_label = True
+                  stores[(doc.get('metadata') or {}).get('name')] = {
+                      'path': p, 'conditions': conds, 'named': named, 'by_label': by_label}
+
+          # 1. the store this repo depends on must exist, be scoped, and honour the
+          # opt-in label — each of those failing separately breaks a different set
+          # of ExternalSecrets at runtime, silently.
+          if STORE not in stores:
+              print(f"no ClusterSecretStore named {STORE!r} — every ExternalSecret in this "
+                    f"repo references it by name. Found: {sorted(stores) or 'none'}",
+                    file=sys.stderr)
+              sys.exit(1)
+          store = stores[STORE]
+          if not store['conditions']:
+              bad.append(f"{store['path']}: {STORE!r} has no spec.conditions — usable from "
+                         f"every namespace, which is the thing this check exists to prevent")
+          if not store['by_label']:
+              bad.append(f"{store['path']}: {STORE!r} has no namespaceSelector matching "
+                         f"{LABEL}: \"true\" — project namespaces carrying the label will "
+                         f"still be refused")
+
+          # 2. every namespace consuming a ClusterSecretStore must be permitted by it:
+          # named in conditions, or carrying the opt-in label (projects).
+          labelled = {}
+          for proj in sorted(pathlib.Path('k8s/projects').glob('*')):
+              if not proj.is_dir() or proj.name == '_template':
+                  continue
+              for p in sorted(proj.rglob('*.y*ml')):
+                  if not synced(p):
+                      continue
+                  for doc in yaml.safe_load_all(p.read_text()):
+                      meta = (doc or {}).get('metadata') or {}
+                      if (doc or {}).get('kind') == 'Namespace' and meta.get('name'):
+                          labelled[meta['name']] = (
+                              (meta.get('labels') or {}).get(LABEL) == 'true', p)
+
+          consumers = 0
+          for root in ('k8s/infra-manifest', 'k8s/projects'):
+              for p in sorted(pathlib.Path(root).rglob('*.y*ml')):
+                  if p.name.endswith('.example') or (root == 'k8s/projects' and not synced(p)):
+                      continue
+                  for doc in yaml.safe_load_all(p.read_text()):
+                      if not doc or doc.get('kind') != 'ExternalSecret':
+                          continue
+                      ref = (doc.get('spec') or {}).get('secretStoreRef') or {}
+                      ns = (doc.get('metadata') or {}).get('namespace')
+                      if ref.get('kind') != 'ClusterSecretStore' or not ns:
+                          continue
+                      consumers += 1
+                      target = stores.get(ref.get('name'))
+                      if target is None:
+                          bad.append(f"{p}: references ClusterSecretStore "
+                                     f"{ref.get('name')!r}, which this repo does not define")
+                          continue
+                      if ns in target['named']:
+                          continue
+                      has_label, nsrc = labelled.get(ns, (False, None))
+                      if has_label and target['by_label']:
+                          continue
+                      where = f"{nsrc}: " if nsrc else f"{p}: "
+                      why = (f"lacks {LABEL}: \"true\"" if nsrc
+                             else "is neither named in spec.conditions nor defined as a "
+                                  "labelled namespace in this repo")
+                      bad.append(f"{where}namespace {ns!r} uses {ref.get('name')!r} "
+                                 f"(see {p}) but {why} — the store will refuse it and the "
+                                 f"ExternalSecret will stall")
+
+          print(f"checked {len(stores)} ClusterSecretStore(s), {consumers} ExternalSecret(s) "
+                f"consuming one; {STORE!r} allows {sorted(store['named'])} by name "
+                f"+ label={store['by_label']}")
+          if not consumers:
+              print("no ExternalSecret references a ClusterSecretStore — expected several",
+                    file=sys.stderr)
+              sys.exit(1)
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY
