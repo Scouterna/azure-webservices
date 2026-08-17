@@ -7,10 +7,8 @@
 # not a secret, but kept out of the committed file so this stays cluster-agnostic).
 installCRDs: true
 
-# Do NOT fold ExternalSecret write access into the built-in admin/edit roles —
-# project developers hold `admin`, and that would let them read any vault secret.
-# Read-only (aggregateToView) is kept so they can see their own sync status.
-# See docs/security.md.
+# Never aggregate ESO write access into admin/edit — project developers hold
+# `admin`. Read-only stays on. docs/security.md §3.
 rbac:
   aggregateToAdmin: false
   aggregateToEdit: false
