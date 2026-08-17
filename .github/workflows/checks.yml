@@ -188,3 +188,50 @@ jobs:
               print('\n'.join(bad), file=sys.stderr)
               sys.exit(1)
           PY
+
+  local-accounts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The static cluster-admin cert bypasses SSO and RBAC and is unattributable.
+      # Committed true so a redeploy re-asserts it. See docs/cluster-access.md.
+      - name: Admin certificate stays disabled in the committed params
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          PARAM = 'disableLocalAccounts'
+          bad = []
+
+          # Textual, not semantic: this guards the committed VALUES against a
+          # regression. Whether the property is valid for the AKS API is bicep's
+          # job (`az bicep build`, run when the Bicep changes).
+          def uncommented(p):
+              return re.sub(r'^\s*//.*$', '', p.read_text(), flags=re.M)
+
+          # 1. the params must not ship the bypass enabled
+          pf = pathlib.Path('infra/env/webservices.bicepparam')
+          m = re.search(rf'^\s*param\s+{PARAM}\s*=\s*(\S+)', uncommented(pf), re.M)
+          if not m:
+              bad.append(f"{pf}: no `param {PARAM} = ...` — the cluster would deploy "
+                         f"with whatever the Bicep default happens to be")
+          elif m.group(1) != 'true':
+              bad.append(f"{pf}: {PARAM} = {m.group(1)}, must be true. A fresh build "
+                         f"enables it temporarily in install.md §7b and disables it "
+                         f"again in §12 — that window does not belong in Git")
+
+          # 2. it must reach the cluster resource, or the committed value is inert
+          for path, why in [
+              ('infra/main.bicep', 'must pass it through to the aks module'),
+              ('infra/aks.bicep', 'must set it on the managedClusters resource'),
+          ]:
+              p = pathlib.Path(path)
+              if not re.search(rf'{PARAM}:\s*{PARAM}\b', uncommented(p)):
+                  bad.append(f"{p}: {why} — without that line the committed value is "
+                             f"inert and the admin certificate stays available")
+
+          print(f"checked {PARAM}: params + wiring through main.bicep and aks.bicep")
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY

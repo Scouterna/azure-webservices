@@ -402,6 +402,17 @@ A good `what-if` ends with `Resource changes: 1 to create.` and a
 
 ## 7b. Get credentials + verify
 
+The committed params set `disableLocalAccounts = true`, so the cluster you just
+deployed has **no** admin certificate — and no SSO yet either, since Dex arrives in
+wave 2. Open that window deliberately, and note when you did:
+
+```bash
+az aks update -g $CLUSTER_RG -n $CLUSTER --enable-local-accounts   # ~1 min
+```
+
+This is a logged Azure operation, which is the point: the bypass exists only
+between here and §12, and both ends of the window are visible in the Activity Log.
+
 ```bash
 az aks get-credentials -g $CLUSTER_RG -n $CLUSTER --admin --overwrite-existing \
   --file ./.kube-webservices                     # gitignored (.kube-*)
@@ -409,6 +420,10 @@ export KUBECONFIG=$PWD/.kube-webservices
 kubectl get nodes -o wide                        # Ready, Standard_D4s_v6, AzureLinux
 kubectl -n kube-system get pods | grep cilium    # cilium + cilium-operator Running (eBPF dataplane)
 ```
+
+> **`Operation failed ... local accounts are disabled`** on `get-credentials
+> --admin` means the `az aks update` above has not finished, or was skipped.
+> Nothing else in the runbook produces that error.
 
 > **`--overwrite-existing` matters on a rebuild.** A rebuilt cluster reuses the
 > name but gets a new CA cert and endpoint, so a leftover entry from the previous
@@ -1094,16 +1109,46 @@ There is deliberately **no ArgoCD endpoint** — see the next section.
 `.kube-webservices` (§7b) is the **cluster admin credential** — a static
 certificate that bypasses Dex, ignores RBAC, and cannot be revoked short of
 rotating the cluster's CA. It exists only to bootstrap a cluster that has no
-working SSO yet. Once Dex does work, it is pure liability, so delete it:
+working SSO yet. Once Dex does work, it is pure liability, so delete the file
+**and close the window you opened in §7b**:
 
 ```bash
-# Prove SSO works BEFORE deleting the fallback — this must print nodes.
+# Prove SSO works BEFORE removing the fallback — this must print nodes.
 kubectl --kubeconfig k8s/access/oidc-kubeconfig get nodes
 
 # Only then:
 unset KUBECONFIG
 rm -f .kube-webservices
+az aks update -g $CLUSTER_RG -n $CLUSTER --disable-local-accounts   # ~1 min
 ```
+
+Deleting the file alone leaves the *capability*: anyone with Azure rights on the
+cluster could re-issue the same credential silently. Disabling local accounts is
+what removes it, and returns the cluster to the state the committed params
+describe. Confirm both:
+
+```bash
+az aks show -g $CLUSTER_RG -n $CLUSTER --query disableLocalAccounts -o tsv   # true
+
+# The credential can no longer be issued — this MUST fail.
+az aks get-credentials -g $CLUSTER_RG -n $CLUSTER --admin --file /tmp/should-fail \
+  && echo "STILL ENABLED — do not proceed" \
+  || echo "admin path closed"
+```
+
+> **Break-glass**, if SSO breaks and you need in: re-run the `--enable-local-accounts`
+> command from §7b, fix the problem, then disable again. Unlike using the cert,
+> that is an Azure control-plane operation — attributable to a person in the
+> Activity Log, and greppable after the fact:
+>
+> ```bash
+> az monitor activity-log list -g $CLUSTER_RG --offset 30d \
+>   --query "[?contains(operationName.value,'managedClusters/write')].{when:eventTimestamp, who:caller}" -o table
+> ```
+>
+> Keep the Azure rights that allow it to as few people as possible, and prefer
+> time-bound (PIM) assignments over standing ones — that is now the control that
+> matters, since it is the only remaining route to cluster-admin outside SSO.
 
 From here on, use the shared OIDC kubeconfig — your own GitHub identity, subject
 to the RBAC from §8c:
@@ -1118,13 +1163,16 @@ kubectl get applications -n argocd
 > what you would need if Dex itself were broken. Admin is the fallback for that
 > case, so it has to outlive the checks that prove SSO works.
 
-> **If you need it again**, re-run the §7b command — it re-issues the same admin
-> credential from Azure at any time. Nothing is lost by deleting it, which is
-> the point: keep a permanent bypass on disk only while it is earning its keep.
-
 `.kube-*` is gitignored, so it was never committed; deleting it removes the copy
 on your workstation. Anyone with the file has full cluster control regardless of
-GitHub org membership, team, or RBAC.
+GitHub org membership, team, or RBAC — which is why the file goes **and** the
+capability behind it goes.
+
+> **Residual risk, stated plainly.** Disabling local accounts stops the credential
+> being *issued*; it is not a cryptographic revocation. A copy taken before §12 is
+> only reliably killed by rotating the cluster CA
+> (`az aks rotate-certs`, disruptive). Treat a leaked `.kube-webservices` as a
+> reason to rotate, not merely to disable.
 
 ## ArgoCD access — pure GitOps, no exposed GUI
 

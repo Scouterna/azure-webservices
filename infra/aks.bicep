@@ -44,6 +44,9 @@ param nodeCount int = 1
 @description('Managed OS disk size (GB). 128 = the AKS default.')
 param osDiskSizeGB int = 128
 
+@description('Disable the static cluster-admin certificate (`az aks get-credentials --admin`). Committed as true; a fresh build must enable it for bootstrap and turn it back off — docs/install.md §7b and §12.')
+param disableLocalAccounts bool = true
+
 @description('SLA tier. Free = no SLA')
 @allowed(['Free', 'Standard'])
 param skuTier string = 'Free'
@@ -74,6 +77,10 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
     kubernetesVersion: kubernetesVersion
     dnsPrefix: dnsPrefix
     enableRBAC: true
+
+    // Break-glass is `az aks update --enable-local-accounts` — an Azure operation
+    // that shows up in the Activity Log, unlike using the cert. docs/security.md §4.
+    disableLocalAccounts: disableLocalAccounts
 
     // OIDC issuer + Workload Identity — credential-free pod access to Azure resources
     oidcIssuerProfile: {
