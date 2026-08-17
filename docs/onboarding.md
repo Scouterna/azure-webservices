@@ -618,13 +618,32 @@ namespace: the `Database` and `DatabaseRole` must live beside the shared cluster
    `port`, `dbname`, `username`, `password` and a ready-made `uri`, each pointing
    at that environment's own database.
 
+   **Then grant those namespaces access to the store.** The shared
+   `ClusterSecretStore` refuses namespaces that do not opt in, so add this label
+   to `namespace-<env>.yaml` for **each** environment getting a database:
+
+   ```yaml
+   scouterna.se/keyvault-access: "true"
+   ```
+
+   ```bash
+   grep -l 'keyvault-access' namespace-*.yaml    # expect one line per env in $ENVS
+   ```
+
+   Skip it and the `ExternalSecret` simply never syncs — nothing alerts on that
+   today, which is why CI fails a project namespace that consumes the store
+   without the label. Note what the label grants: read access to the **whole**
+   vault from that namespace, not just this project's password
+   ([security.md](security.md) §3).
+
    Commit it, then **push both commits** — ArgoCD syncs from the remote, so an
    unpushed commit changes nothing in the cluster:
 
    ```bash
    cd "$(git rev-parse --show-toplevel)"
-   git add "k8s/projects/$PROJECT/infra/database.yaml"
-   git status --short                   # one line: R ...database.yaml.example -> database.yaml
+   git add "k8s/projects/$PROJECT/infra/database.yaml" \
+           "k8s/projects/$PROJECT/infra/"namespace-*.yaml
+   git status --short                   # the rename, plus one M per labelled namespace
    git commit -m "Materialize $PROJECT database credentials"
    git push
    ```

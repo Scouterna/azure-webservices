@@ -7,6 +7,14 @@
 # not a secret, but kept out of the committed file so this stays cluster-agnostic).
 installCRDs: true
 
+# Do NOT fold ExternalSecret write access into the built-in admin/edit roles —
+# project developers hold `admin`, and that would let them read any vault secret.
+# Read-only (aggregateToView) is kept so they can see their own sync status.
+# See docs/security.md.
+rbac:
+  aggregateToAdmin: false
+  aggregateToEdit: false
+
 # Label the pods for Azure Workload Identity, and annotate the SA with the
 # managed identity's client ID.
 serviceAccount:

@@ -74,3 +74,98 @@ jobs:
               print('\n'.join(bad), file=sys.stderr)
               sys.exit(1)
           PY
+
+  secret-store-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The store's identity can read the WHOLE vault, so which namespaces may
+      # use it is the only limit. Unconditioned it is every namespace; a project
+      # namespace missing the opt-in label fails at runtime as a stalled
+      # ExternalSecret, which nothing alerts on. See docs/security.md.
+      - name: ClusterSecretStore is scoped, and users of it are labelled
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+
+          STORE = 'azure-kv'
+          LABEL = 'scouterna.se/keyvault-access'
+          # Only these filenames are synced by the project-infra ApplicationSet;
+          # *.example reference files are deliberately ignored.
+          SYNCED = ('namespace.yaml', 'developer-rbac.yaml', 'database.yaml')
+          bad = []
+
+          def synced(p):
+              return p.name in SYNCED or p.name.startswith(('namespace-', 'sealedsecret-'))
+
+          # 1. the store must not be usable from every namespace
+          stores, allowed = 0, set()
+          for p in sorted(pathlib.Path('k8s/infra-manifest').rglob('*.y*ml')):
+              for doc in yaml.safe_load_all(p.read_text()):
+                  if not doc or doc.get('kind') != 'ClusterSecretStore':
+                      continue
+                  stores += 1
+                  conds = (doc.get('spec') or {}).get('conditions')
+                  if not conds:
+                      bad.append(f"{p}: ClusterSecretStore {doc['metadata']['name']!r} has no "
+                                 f"spec.conditions — usable from every namespace")
+                  for c in conds or []:
+                      allowed |= set(c.get('namespaces') or [])
+          if stores == 0:
+              print("no ClusterSecretStore found — expected exactly one", file=sys.stderr)
+              sys.exit(1)
+
+          # 2. every INFRA namespace consuming the store must be named in conditions.
+          # Project namespaces are covered by the label selector instead — see 3.
+          infra = 0
+          for p in sorted(pathlib.Path('k8s/infra-manifest').rglob('*.y*ml')):
+              if p.name.endswith('.example'):
+                  continue
+              for doc in yaml.safe_load_all(p.read_text()):
+                  if not doc or doc.get('kind') != 'ExternalSecret':
+                      continue
+                  ref = (doc.get('spec') or {}).get('secretStoreRef') or {}
+                  ns = (doc.get('metadata') or {}).get('namespace')
+                  if ref.get('name') != STORE or not ns:
+                      continue
+                  infra += 1
+                  if ns not in allowed:
+                      bad.append(f"{p}: ExternalSecret in namespace {ns!r} uses {STORE!r}, "
+                                 f"but that namespace is not in spec.conditions — it will stall")
+
+          # 3. a project namespace consuming the store must carry the opt-in label
+          consumers, labelled = {}, {}
+          for proj in sorted(pathlib.Path('k8s/projects').glob('*')):
+              if not proj.is_dir() or proj.name == '_template':
+                  continue
+              for p in sorted(proj.rglob('*.y*ml')):
+                  if not synced(p):
+                      continue
+                  for doc in yaml.safe_load_all(p.read_text()):
+                      if not doc:
+                          continue
+                      meta = doc.get('metadata') or {}
+                      if doc.get('kind') == 'ExternalSecret':
+                          ref = (doc.get('spec') or {}).get('secretStoreRef') or {}
+                          if ref.get('name') == STORE and meta.get('namespace'):
+                              consumers.setdefault(meta['namespace'], p)
+                      elif doc.get('kind') == 'Namespace' and meta.get('name'):
+                          labelled[meta['name']] = (
+                              (meta.get('labels') or {}).get(LABEL) == 'true', p)
+
+          for ns, src in sorted(consumers.items()):
+              has, nsrc = labelled.get(ns, (False, None))
+              if nsrc is None:
+                  bad.append(f"{src}: ExternalSecret targets namespace {ns!r}, which no "
+                             f"namespace manifest in this repo defines")
+              elif not has:
+                  bad.append(f"{nsrc}: namespace {ns!r} uses ClusterSecretStore {STORE!r} "
+                             f"(see {src}) but lacks {LABEL}: \"true\" — the store will "
+                             f"refuse it and the ExternalSecret will stall")
+
+          print(f"checked {stores} ClusterSecretStore(s), {infra} infra ExternalSecret(s), "
+                f"{len(consumers)} project namespace(s) consuming it")
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY
