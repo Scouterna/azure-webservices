@@ -125,6 +125,15 @@ namespace, and both were:
 `externalsecrets: create`. The values file now sets `rbac.aggregateToAdmin: false`
 and `rbac.aggregateToEdit: false`.
 
+That ClusterRole granted more than reading. The same verbs covered `PushSecret`
+and `ClusterPushSecret`, which write *into* the vault — so the exposure was
+tamper and destroy, not only disclosure — and the 18 `generators.external-secrets.io`
+kinds, including `Webhook`, which makes the ESO controller issue an arbitrary
+HTTP request and capture the response into a Secret. Dropping the aggregation
+labels removes all 23 resources at once, not just `externalsecrets`. Worth
+knowing before anyone re-enables `aggregateToEdit` to grant read access —
+`aggregateToView` is the flag for that, and it is already on.
+
 `rbac.aggregateToView` is deliberately left **on**: read-only `get`/`watch`/`list`
 on the `ExternalSecret` object lets a developer see whether their own secret
 synced. It exposes the *key name* in the spec, never the value — and the
