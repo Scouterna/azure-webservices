@@ -881,9 +881,28 @@ and unbacked-up, and neither raises an alert.
 
 `deny-imds-egress` (wave 0, in `cluster-infra`) denies egress to the Azure
 Instance Metadata Service from every namespace except `kube-system`, closing the
-path where any pod mints tokens for the node's kubelet identity. **An unenforced
-policy looks identical to an enforced one in `get applications`** — the app is
-`Synced` either way, because the object exists. Probe it:
+path where any pod mints tokens for the node's kubelet identity. **`Synced` and
+`Healthy` do not mean this policy exists, let alone that it is enforced.** Two
+distinct failure shapes look identical from `get applications`:
+
+- The object is **applied but not enforced** — an unenforced policy looks
+  identical to an enforced one; the app is `Synced` either way because the
+  object exists.
+- The object is **missing entirely**, and `cluster-infra` still reports
+  `Synced`/`Healthy` — this happens when the app is sitting on a commit behind
+  `origin/main` that predates the policy, or when a manual sync dropped it (see
+  [argocd.md](argocd.md) "Sync — actually apply"). `Synced` compares against
+  the revision the app last recorded, not against the tip of `main`.
+
+Check the revision before probing the object:
+
+```bash
+kubectl -n argocd get app cluster-infra   -o jsonpath='{.status.sync.revision}{"\n"}'
+git -C "$(git rev-parse --show-toplevel)" rev-parse origin/main
+# the two must match — if they don't, the app hasn't seen the commit you expect
+```
+
+Then probe the object itself:
 
 ```bash
 kubectl get crd ciliumclusterwidenetworkpolicies.cilium.io   # CRD present at all
