@@ -409,8 +409,21 @@ infra:
 
 Anything on that list is an infra request, delivered through
 `k8s/projects/<project>/infra/` in the infra repo — which only infra can commit.
-That is the same boundary as before; it is now enforced by the AppProject rather
-than by infra reviewing every change.
+
+**What enforces it depends on the route.** For your GitOps repo, the AppProject
+does: a sync of an excluded kind is rejected. Deploying by hand goes straight to
+the API server, where the limit is Kubernetes RBAC — `admin` in your namespaces —
+which does not match this table exactly:
+
+- `ExternalSecret` is also blocked by hand: the operator's write permissions are
+  deliberately not folded into `admin` ([security.md](security.md) §3).
+- `RoleBinding`, `Role`, `ServiceAccount` and `Secret` **are** within `admin`, so
+  the API server will accept them in your own namespaces. They stay on this list
+  anyway — creating them by hand is out of bounds and will be reverted, and a
+  `RoleBinding` is the one that could widen your own access.
+
+If you find yourself able to do something on this list, treat it as a gap to
+report rather than a shortcut.
 
 ## Secrets
 

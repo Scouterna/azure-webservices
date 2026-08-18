@@ -224,6 +224,23 @@ As of the initial build:
 
 ---
 
+## Not yet implemented
+
+Controls the design assumes but the cluster does not enforce yet. Distinct from
+[Accepted risks](#accepted-risks-revisit-deliberately) below, which are decisions
+to live with something, and from [decisions.md](decisions.md), which records
+choices already made. These are gaps that should close.
+
+| Gap | What it means today | What closes it |
+|---|---|---|
+| **No API-server audit retention** — no diagnostic settings on the cluster | `kube-audit-admin` and `guard` logs go nowhere, so "who did this" is unanswerable after the fact, whichever way they authenticated | `Microsoft.Insights/diagnosticSettings` → Log Analytics, with a retention period |
+| **Alertmanager has no receiver** | Alert rules exist and fire, but nothing leaves the cluster — including the governance alerts above and any future signal that a control has stopped working | A receiver (email/Slack/webhook) and a deliberate route |
+| **No image or manifest scanning in CI** — [`checks.yml`](../.github/workflows/checks.yml) validates YAML, placeholders and two security invariants only; images are pinned by tag, not digest | A compromised or vulnerable upstream tag is adopted on the next pull, silently | Trivy + kube-linter in CI; digest pinning with Renovate keeping digests current |
+
+The Alertmanager gap compounds the other two: several controls fail quietly
+(a stalled `ExternalSecret`, a backup that archives nothing), and until something
+delivers alerts, "it would be noticed" is not true of any of them.
+
 ## Accepted risks (revisit deliberately)
 
 Things we know are not ideal, why they are that way, and what would close them.
