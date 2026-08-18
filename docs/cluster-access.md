@@ -1,6 +1,7 @@
 # Cluster access
 
-Who can be cluster-admin, how that is revoked, and what to do when SSO breaks.
+Who can be cluster-admin, why the static admin certificate **cannot** be retired
+on this cluster, and what constrains it instead.
 
 ## Two paths, and only one of them is attributable
 
@@ -16,74 +17,82 @@ than as anyone, and cannot be revoked short of rotating the cluster CA. It exist
 because a fresh cluster has no working SSO: Dex arrives in wave 2, so something
 has to install wave 2.
 
-## Why the file was deleted but the hole stayed open
+[install.md](install.md) §12 deletes the file once SSO is proven. That removes the
+*copy*. It does not remove the *capability*, and on this cluster the capability
+cannot be removed at all.
 
-§12 has always deleted `.kube-webservices` once SSO is proven. That removed the
-*copy*, not the *capability*: `properties.disableLocalAccounts` was unset, so
-anyone with Azure write access on the cluster could re-issue the same credential
-at any time, silently, and use it as an identity that no log attributes to a
-human. §12 said as much — "re-run the §7b command" — which made the deletion a
-tidy-up rather than a control.
+## Why the certificate cannot be disabled
 
-The params now commit `disableLocalAccounts = true`
-([`infra/env/webservices.bicepparam`](../infra/env/webservices.bicepparam)), and
-§12 turns it off in Azure as well as deleting the file.
+`properties.disableLocalAccounts` is the property that would remove it. AKS
+rejects it on a cluster without Entra integration — not at the Bicep type level,
+where it is a perfectly valid property, but in ARM preflight:
 
-**Committed `true`, not `false`.** The insecure state is the one that needs an
-explicit act, so a routine redeploy — the `nodeCount` bump-and-redeploy workflow —
-re-asserts the secure state instead of silently undoing it. The cost is that a
-fresh build cannot bootstrap out of the box, which §7b handles by opening the
-window on purpose and §12 closes.
+```
+BadRequest: Since kubernetes version 1.25, disableLocalAccounts can only be set
+on Azure AD integration enabled cluster. Please integrate your cluster with AAD.
+```
 
-**The bootstrap window is deliberate and bounded.** §7b runs
-`az aks update --enable-local-accounts`, bootstraps, and §12 disables again. Both
-ends are Azure control-plane operations, so the window has a start and an end in
-the Activity Log. Compare the old behaviour, where the credential could be minted
-at any time with nothing to show it had happened.
+Confirmed twice against a test cluster — 2026-07-21, and again 2026-08-18 on API
+`2026-03-01` with Kubernetes 1.36. It is a current constraint, not a stale one or
+an artefact of an old API version.
 
-**Break-glass is the same command, not a standing bypass.** If SSO breaks —
-JWTAuthenticator is a preview feature ([install.md](install.md) §8b), Dex is a pod
-like any other — re-enable local accounts, fix it, disable again. The important
-difference from the old state is not that it is harder; it is that it is
-*recorded*.
+**And Entra integration is ruled out for this cluster, deliberately and
+permanently:**
 
-## Why not Entra ID / Azure RBAC yet
+- **Developers are volunteers, and GitHub is their identity.** Managed Entra
+  integration would require every project developer to exist as a user or guest in
+  Scouterna's Entra tenant. Many are not, and will not be. That is the whole
+  reason the cluster runs Dex → GitHub with a JWTAuthenticator instead of Entra.
+- **It would tie RBAC to the tenant.** Bindings would reference Entra object IDs
+  instead of GitHub team names, against the portability the platform is built
+  around ([the top-level README](../README.md)).
 
-The obvious alternative is `aadProfile` with `managed: true` and
-`enableAzureRBAC: true`, granting the infra group *Azure Kubernetes Service RBAC
-Cluster Admin* — attributable, revocable, and PIM-eligible, which is a better
-standing admin path than either of the two above. It is deliberately **not** in
-this change, for two reasons:
+Two further objections apply but are not the deciding ones: enabling managed Entra
+integration cannot be undone on an existing cluster, and its interaction with the
+JWTAuthenticator — a preview feature that is currently the *only* developer path —
+is untested.
 
-- **Enabling managed Entra integration is a one-way door.** It cannot be turned
-  off again on an existing cluster. That is a decision to take on purpose, not a
-  side effect of closing a finding.
-- **Its interaction with the JWTAuthenticator is unverified.** Both configure
-  authentication on the API server, and the JWT path is a preview feature that is
-  currently the *only* way developers reach the cluster. Turning on a second
-  authenticator without testing it risks the developer path for a break-glass
-  improvement.
+**So this is settled, not pending.** `aadProfile` is the precondition for
+`disableLocalAccounts`; Entra is off the table; therefore the local admin
+certificate stays available on this cluster unless the identity model itself
+changes. It is not a to-do.
 
-Until that is tested on a throwaway cluster, the compensating control is Azure
-RBAC hygiene: **the rights that permit `az aks update` on this cluster are now the
-only route to cluster-admin outside SSO.** Keep them to as few people as possible
-and prefer time-bound (PIM) assignments to standing ones.
+## What constrains it instead
+
+The rights that permit `az aks get-credentials --admin` are **the only route to
+cluster-admin outside SSO**, which makes Azure role hygiene the real control here
+rather than a fallback:
+
+- Grant **`Azure Kubernetes Service Cluster Admin Role`** — and `Contributor` on
+  the cluster resource group, which also implies it — to as few people as
+  possible.
+- Make those assignments **PIM-eligible rather than standing**: time-bound,
+  approval-gated, and logged at activation. A standing assignment is a permanent
+  cluster-admin held by whoever has it.
+- Review the assignment list as deliberately as the cluster's own RBAC:
+
+  ```bash
+  az role assignment list -g $CLUSTER_RG --include-inherited \
+    --query "[].{who:principalName, role:roleDefinitionName, scope:scope}" -o table
+  ```
 
 ## Known limits
 
-- **Disabling is not revocation.** It stops the credential being *issued*. A copy
-  taken during the bootstrap window still validates; only rotating the cluster CA
-  (`az aks rotate-certs`, disruptive) kills it. A leaked `.kube-webservices` is a
-  reason to rotate.
-- **In-cluster actions are still unattributed.** No API-server audit log is
-  shipped anywhere, so "who did this" is unanswerable regardless of which path
-  they used. Closing that is a separate change
-  ([maintenance.md](maintenance.md) lists it as not yet implemented).
-- **Nothing detects the window being reopened.** Re-enabling local accounts is
-  logged in Azure but not alerted on, and the next Bicep redeploy silently
-  reverts it — which is the right direction, but means a reopened window can pass
-  unnoticed until then. An Activity Log alert would close it.
-- **`az aks update` and the deployment can disagree.** Azure holds the live state;
-  the committed params hold the intended one. They reconverge on the next
-  redeploy, so treat `az aks show --query disableLocalAccounts` as the truth in
-  the moment and the params as the truth over time.
+- **Use of the certificate is attributable in Azure, not in the cluster.**
+  Minting it calls
+  `Microsoft.ContainerService/managedClusters/listClusterAdminCredential/action`,
+  a control-plane operation, so the Activity Log should record who asked for it —
+  worth confirming once on this tenant, because it is the only attribution
+  available. What it *does* afterwards is unattributed: every request arrives as
+  `masterclient`.
+- **Deleting the file is not revocation.** A copy taken before §12 keeps working.
+  Only rotating the cluster CA (`az aks rotate-certs`, disruptive) invalidates it,
+  so a leaked `.kube-webservices` is a reason to rotate rather than merely to
+  delete.
+- **In-cluster actions are unattributed regardless of path.** No API-server audit
+  log is shipped anywhere, so "who did this" is unanswerable whether they used SSO
+  or the certificate. That is a separate, open gap
+  ([maintenance.md](maintenance.md) lists it under not-yet-implemented).
+- **If the identity model ever changes**, this decision is what to revisit — an
+  Entra-integrated cluster could disable the certificate, at the cost of the
+  volunteer-friendly GitHub identity that motivated the current design.

@@ -18,8 +18,3 @@ param skuTier = 'Free'          // 'Free' = no paid API-server SLA (budget). 'St
 param vmSize = 'Standard_D4s_v6' // Intel, 4 vCPU / 16 GB, 12 data disks — disks are the binding limit.
 param nodeCount = 1              // Manual scaling: bump this + redeploy to add nodes.
 param zones = ['1', '2', '3']
-
-// --- Access ---
-// Committed true so any redeploy re-asserts it. A fresh build turns it off for
-// bootstrap and back on at install.md §12 — docs/cluster-access.md.
-param disableLocalAccounts = true
