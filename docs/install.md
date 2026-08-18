@@ -1132,14 +1132,13 @@ kubectl get applications -n argocd
 
 `.kube-*` is gitignored, so it was never committed; deleting it removes the copy
 on your workstation. Anyone with the file has full cluster control regardless of
-GitHub org membership, team, or RBAC — which is why the file goes **and** the
-capability behind it goes.
+GitHub org membership, team, or RBAC. The file goes; the capability behind it
+stays, which is why the Azure rights above are the thing to keep short.
 
-> **Residual risk, stated plainly.** Disabling local accounts stops the credential
-> being *issued*; it is not a cryptographic revocation. A copy taken before §12 is
-> only reliably killed by rotating the cluster CA
-> (`az aks rotate-certs`, disruptive). Treat a leaked `.kube-webservices` as a
-> reason to rotate, not merely to disable.
+> **Deleting is not revocation.** The certificate stays valid whether or not a
+> copy of it exists, and it cannot be disabled on this cluster. Only rotating the
+> cluster CA (`az aks rotate-certs`, disruptive) invalidates it, so treat a leaked
+> `.kube-webservices` as a reason to rotate rather than merely to delete.
 
 ## ArgoCD access — pure GitOps, no exposed GUI
 

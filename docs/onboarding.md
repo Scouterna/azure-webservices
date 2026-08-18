@@ -420,7 +420,9 @@ which does not match this table exactly:
 - `RoleBinding`, `Role`, `ServiceAccount` and `Secret` **are** within `admin`, so
   the API server will accept them in your own namespaces. They stay on this list
   anyway — creating them by hand is out of bounds and will be reverted, and a
-  `RoleBinding` is the one that could widen your own access.
+  `RoleBinding` is the one that could widen *someone else's* access: Kubernetes
+  refuses to grant permissions you do not already hold, so you cannot escalate
+  yourself, but you can hand your level to another person.
 
 If you find yourself able to do something on this list, treat it as a gap to
 report rather than a shortcut.

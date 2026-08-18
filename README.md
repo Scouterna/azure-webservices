@@ -163,8 +163,10 @@ Projects are onboarded via [docs/onboarding.md](docs/onboarding.md). In short:
   Secrets or ArgoCD Applications. Those stay infra-granted. It bounds the **GitOps
   path**; a project deploying by hand is bounded instead by Kubernetes RBAC and
   Pod Security, which is why those matter as much as the whitelist.
-- Projects needing centralized secrets declare an `ExternalSecret` referencing
-  the shared Key Vault — a native Kubernetes Secret appears, no CSI mount dance.
+- Projects needing centralized secrets get them from the shared Key Vault as
+  native Kubernetes Secrets — no CSI mount dance. Infra commits the
+  `ExternalSecret`, because creating one reads the vault; see
+  [docs/decisions.md](docs/decisions.md) entry 6.
 
 ### Governance by observation
 
