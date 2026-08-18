@@ -1105,6 +1105,18 @@ unset KUBECONFIG
 rm -f .kube-webservices
 ```
 
+> **Deleting the file does not remove the capability, and on this cluster it
+> cannot be removed.** `disableLocalAccounts` is the property that would, and AKS
+> only accepts it on an Entra-integrated cluster — which this one deliberately is
+> not, because developers authenticate as their GitHub identity. So anyone with
+> the Azure rights to run the §7b command can re-mint this credential at any time.
+>
+> That makes the **Azure role assignments the actual control**, not an
+> afterthought: `Azure Kubernetes Service Cluster Admin Role` (and `Contributor`
+> on the cluster RG) should go to as few people as possible, PIM-eligible rather
+> than standing. See [cluster-access.md](cluster-access.md) for the full reasoning
+> and what use of the certificate does and does not leave behind.
+
 From here on, use the shared OIDC kubeconfig — your own GitHub identity, subject
 to the RBAC from §8c:
 
@@ -1118,13 +1130,15 @@ kubectl get applications -n argocd
 > what you would need if Dex itself were broken. Admin is the fallback for that
 > case, so it has to outlive the checks that prove SSO works.
 
-> **If you need it again**, re-run the §7b command — it re-issues the same admin
-> credential from Azure at any time. Nothing is lost by deleting it, which is
-> the point: keep a permanent bypass on disk only while it is earning its keep.
-
 `.kube-*` is gitignored, so it was never committed; deleting it removes the copy
 on your workstation. Anyone with the file has full cluster control regardless of
-GitHub org membership, team, or RBAC.
+GitHub org membership, team, or RBAC. The file goes; the capability behind it
+stays, which is why the Azure rights above are the thing to keep short.
+
+> **Deleting is not revocation.** The certificate stays valid whether or not a
+> copy of it exists, and it cannot be disabled on this cluster. Only rotating the
+> cluster CA (`az aks rotate-certs`, disruptive) invalidates it, so treat a leaked
+> `.kube-webservices` as a reason to rotate rather than merely to delete.
 
 ## ArgoCD access — pure GitOps, no exposed GUI
 

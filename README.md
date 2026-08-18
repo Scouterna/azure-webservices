@@ -50,9 +50,14 @@ ArgoCD**, so the whole platform can be torn down and rebuilt from this repo.
 ```
 
 The cluster is **AKS** in **Sweden Central**: a single `Standard_D4s_v6` node
-(4 vCPU / 16 GB, manual scaling), Kubernetes 1.36.2, **Cilium** eBPF dataplane +
-NetworkPolicy, Workload Identity + OIDC, and the Key Vault CSI add-on. See
-[`infra/aks.bicep`](infra/aks.bicep).
+(4 vCPU / 16 GB, manual scaling), Kubernetes 1.36.2, **Cilium** eBPF dataplane
+enforcing NetworkPolicy, Workload Identity + OIDC, and the Key Vault CSI add-on.
+See [`infra/aks.bicep`](infra/aks.bicep).
+
+What the cluster actually enforces today — one cluster-wide egress deny, baseline
+Pod Security on project namespaces, and no default-deny baseline yet — is in
+[docs/security.md](docs/security.md), with the reasoning behind each choice in
+[docs/decisions.md](docs/decisions.md).
 
 Storage is in-cluster and portable: **MinIO** for S3-compatible object storage
 (backs Loki, Thanos, and backups) and **CloudNativePG** for PostgreSQL — no Azure
@@ -141,10 +146,13 @@ Projects are onboarded via [docs/onboarding.md](docs/onboarding.md). In short:
 
 - A project gets one or more **namespaces** (e.g. `myapp-dev`, `myapp-prod`).
 - Developers sign in with their **GitHub identity via Dex SSO**, in Headlamp and
-  with `kubectl` alike — full control inside their namespaces, nothing outside
-  them. Access is granted by committing a RoleBinding that names a GitHub team;
-  there are **no ServiceAccount tokens to hand out**, and revoking access is
-  removing someone from the team.
+  with `kubectl` alike — ClusterRole `admin` inside their namespaces, and no grant
+  outside them. Namespaces enforce the `baseline` Pod Security Standard, so
+  `admin` stops at the node rather than reaching it. Access is granted by
+  committing a RoleBinding that names a GitHub team; there are **no ServiceAccount
+  tokens to hand out**, and revoking access is removing someone from the team —
+  effective on the next login, with an already-issued session lasting until its
+  token expires (24h).
 - The project's **own workload** runs one of two ways, its choice: **by hand**
   (`kubectl`/`helm` with its own credentials), or from **its own GitOps repo**,
   which infra wires into ArgoCD once. Workload manifests never live in this repo.
@@ -152,9 +160,13 @@ Projects are onboarded via [docs/onboarding.md](docs/onboarding.md). In short:
   release without restarting it.
 - A project's ArgoCD scope is its **own AppProject**, naming only its repo and
   its namespaces, and permitting workload kinds only — not RBAC, ServiceAccounts,
-  Secrets or ArgoCD Applications. Those stay infra-granted.
-- Projects needing centralized secrets declare an `ExternalSecret` referencing
-  the shared Key Vault — a native Kubernetes Secret appears, no CSI mount dance.
+  Secrets or ArgoCD Applications. Those stay infra-granted. It bounds the **GitOps
+  path**; a project deploying by hand is bounded instead by Kubernetes RBAC and
+  Pod Security, which is why those matter as much as the whitelist.
+- Projects needing centralized secrets get them from the shared Key Vault as
+  native Kubernetes Secrets — no CSI mount dance. Infra commits the
+  `ExternalSecret`, because creating one reads the vault; see
+  [docs/decisions.md](docs/decisions.md) entry 6.
 
 ### Governance by observation
 

@@ -182,5 +182,8 @@ every namespace consuming it is permitted by one clause or the other.
 - **The WireServer at `168.63.129.16` is not blocked.** It also serves platform
   DNS and health probes, so denying it needs its own analysis.
 - **IPv6 is not addressed** — Azure IMDS is IPv4-only.
-- Out of scope here, each its own change: `disableLocalAccounts`, API-server audit
-  retention, and an Alertmanager receiver.
+- **Cluster-admin access is a separate document.** The static admin certificate,
+  why it cannot be disabled on this cluster, and what constrains it instead are in
+  [cluster-access.md](cluster-access.md).
+- **Out of scope here**, each its own change: API-server audit retention and an
+  Alertmanager receiver.
