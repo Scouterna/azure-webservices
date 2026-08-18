@@ -172,6 +172,14 @@ In both cases: add one RoleBinding **per namespace** the team/developer should
 access (a dev/prod project needs a binding in each), and use ClusterRole `admin`
 (full control within the namespace) or `view` (read-only).
 
+**`roleRef` is immutable.** Changing `admin` to `view` (or back) on an
+**existing** binding and committing it does not do what it looks like it does:
+Kubernetes refuses the update (`cannot change roleRef`), ArgoCD's sync fails and
+retries against the same rejection, and the live binding stays on the old role
+the whole time — silently, since nothing here surfaces a stuck sync as a security
+gap. **Delete the block and re-add it** (same name is fine) rather than editing
+`roleRef` in place; that becomes a delete-then-create, which Kubernetes allows.
+
 **Commit** — ArgoCD creates the RoleBinding(s):
 
 ```bash
@@ -634,14 +642,16 @@ namespace: the `Database` and `DatabaseRole` must live beside the shared cluster
    at that environment's own database.
 
    **Then grant those namespaces access to the store.** The shared
-   `ClusterSecretStore` refuses namespaces that do not opt in, so add this label
-   to `namespace-<env>.yaml` for **each** environment getting a database:
+   `ClusterSecretStore` refuses namespaces that do not opt in. In
+   `k8s/projects/$PROJECT/infra/`, add this line under `metadata.labels` in
+   `namespace-<env>.yaml`, for **each** environment getting a database:
 
    ```yaml
    scouterna.se/keyvault-access: "true"
    ```
 
    ```bash
+   cd "$(git rev-parse --show-toplevel)/k8s/projects/$PROJECT/infra"
    grep -l 'keyvault-access' namespace-*.yaml    # expect one line per env in $ENVS
    ```
 

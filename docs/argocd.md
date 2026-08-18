@@ -112,6 +112,20 @@ kubectl patch app -n argocd <app> --type merge \
   -p '{"operation":{"initiatedBy":{"username":"'"$USER"'"},"sync":{}}}'
 ```
 
+**This drops the app's `syncOptions`.** ArgoCD reads sync options from the
+*operation*, not from `spec.syncPolicy.syncOptions` — an operation with an empty
+`sync: {}` gets none, regardless of what the Application declares. Concretely:
+an app with `CreateNamespace=true` will fail with `namespaces "<ns>" not found`
+on a hand-triggered sync against a namespace that doesn't exist yet, even though
+the same app syncs it fine when `selfHeal` triggers automatically. Carry the
+options through explicitly:
+
+```bash
+OPTS=$(kubectl get app -n argocd <app> -o jsonpath='{.spec.syncPolicy.syncOptions}')
+kubectl patch app -n argocd <app> --type merge \
+  -p '{"operation":{"initiatedBy":{"username":"'"$USER"'"},"sync":{"syncOptions":'"$OPTS"'}}}'
+```
+
 Then check the result — the patch returns immediately and tells you nothing:
 
 ```bash
