@@ -28,7 +28,7 @@ param nodeCount int = 1
 @description('Availability zones.')
 param zones string[] = ['1', '2', '3']
 
-@description('Disable the static cluster-admin certificate. See aks.bicep and docs/security.md §4.')
+@description('Disable the static cluster-admin certificate. See aks.bicep and docs/cluster-access.md.')
 param disableLocalAccounts bool = true
 
 module aks 'aks.bicep' = {

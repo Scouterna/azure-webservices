@@ -21,5 +21,5 @@ param zones = ['1', '2', '3']
 
 // --- Access ---
 // Committed true so any redeploy re-asserts it. A fresh build turns it off for
-// bootstrap and back on at §12 — docs/security.md §4.
+// bootstrap and back on at install.md §12 — docs/cluster-access.md.
 param disableLocalAccounts = true

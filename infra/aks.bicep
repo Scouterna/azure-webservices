@@ -79,7 +79,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
     enableRBAC: true
 
     // Break-glass is `az aks update --enable-local-accounts` — an Azure operation
-    // that shows up in the Activity Log, unlike using the cert. docs/security.md §4.
+    // that shows up in the Activity Log, unlike using the cert. docs/cluster-access.md.
     disableLocalAccounts: disableLocalAccounts
 
     // OIDC issuer + Workload Identity — credential-free pod access to Azure resources
