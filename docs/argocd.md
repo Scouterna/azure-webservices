@@ -122,9 +122,16 @@ options through explicitly:
 
 ```bash
 OPTS=$(kubectl get app -n argocd <app> -o jsonpath='{.spec.syncPolicy.syncOptions}')
+OPTS=${OPTS:-[]}          # an app with no syncOptions yields an empty string, not []
 kubectl patch app -n argocd <app> --type merge \
   -p '{"operation":{"initiatedBy":{"username":"'"$USER"'"},"sync":{"syncOptions":'"$OPTS"'}}}'
 ```
+
+The `${OPTS:-[]}` is not optional. `jsonpath` returns a JSON array when the field
+is set, but an **empty string** when it is absent — which would splice into
+`"syncOptions":}` and be rejected as malformed. Project dev apps are manual-sync
+and often have no `syncOptions` at all, so this is the common case here, not the
+edge case.
 
 Then check the result — the patch returns immediately and tells you nothing:
 
