@@ -42,6 +42,7 @@ INFRA_RG=webservices-infra        # RG holding the Key Vault, identities, backup
 KEY_VAULT_NAME=kv-scouterna-webservices       # Key Vault name (globally unique, 3-24 chars)
 BACKUP_STORAGE_ACCOUNT=stwsv2backup              # backup storage account (globally unique, 3-24 lowercase alnum)
 LOG_WORKSPACE=log-webservices     # audit workspace (must match auditWorkspaceName in the bicepparam)
+ALERT_EMAIL=info@scouterna.se     # receives audit-pipeline alerts (a shared mailbox, not a person)
 
 # --- Identities (in $INFRA_RG; persist across rebuilds) ---
 ESO_IDENTITY=id-eso-webservices       # managed identity ESO authenticates as
@@ -328,6 +329,36 @@ If you overrode `$INFRA_RG`, add `-p auditWorkspaceResourceGroup=$INFRA_RG` to t
 > for this cluster, but it means an audit gap exactly when something is generating
 > a lot of API traffic. Raise `dailyQuotaGb` deliberately if that trade-off is
 > wrong for you; the reasoning is in [decisions.md](decisions.md) entry 9.
+
+## 5c. Audit alerting
+
+Two rules, deployed outside the cluster so they still fire when the cluster is the
+problem — and independent of the in-cluster Alertmanager gap:
+
+```bash
+az deployment group create -g $INFRA_RG -f infra/alerts.bicep   -p workspaceName=$LOG_WORKSPACE alertEmail=$ALERT_EMAIL
+```
+
+- `audit-pipeline-deleted` — someone deletes the diagnostic setting or the
+  workspace. Collection stops silently; the Activity Log is the only record.
+- `audit-ingestion-capped` — the daily cap stops ingestion. The workspace keeps
+  reporting healthy while dropping everything, so nothing else would show it.
+
+**Confirm the email receiver is actually confirmed.** Azure sends a subscription
+notice to a new address, and until someone acts on it the receiver exists while
+delivering nothing:
+
+```bash
+az monitor action-group show -g $INFRA_RG -n audit-alerts   --query "emailReceivers[].{name:name, address:emailAddress, status:status}" -o table
+```
+
+Expect `status: Enabled`. `Disabled` means the confirmation mail was not accepted —
+the alert will fire and reach no one.
+
+> The Activity Log alert and the action group cost nothing. The cap rule is a log
+> alert and is billed per rule per month — small, but not zero. See
+> [decisions.md](decisions.md) entry 9 if you would rather drop it and rely on the
+> quarterly check instead.
 
 ## 6. Write the bootstrap secrets to Key Vault
 

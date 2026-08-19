@@ -262,13 +262,28 @@ audited**: no diagnostic setting exists on the vault, so there is no record of w
 secrets were read from the cluster's root of trust. Given that this category cannot
 record Kubernetes reads either, that is the notable remaining gap — it is the half
 of the original finding this change does not close, and it stays listed in
-[maintenance.md](maintenance.md). **Nothing alerts on it yet, but that is not blocked on Alertmanager.** In-cluster
-alerting is (see [maintenance.md](maintenance.md)); this workspace is not. An Azure
-Monitor action group with an email receiver, plus a rule on the workspace's
-daily-cap event and an Activity Log alert on `diagnosticSettings/delete` and
-`workspaces/delete`, are all available today and cost nothing. Those two alerts are
-what would make this control trustworthy rather than merely present, and they are
-the obvious next step.
+[maintenance.md](maintenance.md). **Alerting is Azure-side, not Alertmanager.** In-cluster alerting is still missing
+(see [maintenance.md](maintenance.md)), but this workspace never depended on it:
+`infra/alerts.bicep` carries an action group with an email receiver and two rules,
+deployed outside the cluster so they still fire when the cluster is the problem.
+
+- **`audit-pipeline-deleted`** — an Activity Log alert on
+  `Microsoft.Insights/diagnosticSettings/delete` and
+  `Microsoft.OperationalInsights/workspaces/delete`. This is the tamper case:
+  deleting either stops collection silently, and the Activity Log is the only place
+  it is recorded. Scoped to the subscription, because the point is to catch a delete
+  wherever it happens.
+- **`audit-ingestion-capped`** — a log query rule on `_LogOperation`, firing when the
+  daily cap stops ingestion. Without it the cap is invisible: the workspace keeps
+  reporting healthy while dropping everything, which is what makes the cap abusable
+  rather than merely inconvenient.
+
+**Cost, stated precisely rather than as "free".** The action group and the Activity
+Log alert cost nothing. The cap rule is an Azure Monitor **log** alert and is billed
+per rule per month — small, but not zero. If that is unwanted, delete the rule and
+rely on the quarterly `dataIngestionStatus` check in
+[maintenance.md](maintenance.md) instead; the trade is detection latency measured in
+months rather than minutes.
 
 **The workspace may contain secret material, and is treated as though it does.**
 `AKSAuditAdmin` has `RequestObject` and `ResponseObject` columns — "Kubernetes API
