@@ -242,7 +242,7 @@ Log Analytics workspace ([decisions.md](decisions.md) entry 9). Two caveats keep
 rows above: it records mutations, **not reads**, and nothing alerts on it — though
 for this workspace the useful alerts are Azure-side and do not wait on Alertmanager.
 
-The Alertmanager gap compounds the other: several controls fail quietly
+The Alertmanager gap compounds the other two: several controls fail quietly
 (a stalled `ExternalSecret`, a backup that archives nothing), and until something
 delivers alerts, "it would be noticed" is not true of any of them.
 
