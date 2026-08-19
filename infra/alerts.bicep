@@ -92,7 +92,7 @@ resource tamperAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
 
 // The daily cap stops ingestion and the workspace still reports healthy, so this is
 // the only thing that makes a blinded audit log visible. docs/decisions.md 9.
-resource capAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
+resource capAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
   name: 'audit-ingestion-capped'
   location: location
   tags: tags
@@ -110,7 +110,9 @@ resource capAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = 
     criteria: {
       allOf: [
         {
-          query: '_LogOperation | where Category == "Ingestion" and Detail has "daily limit"'
+          // Microsoft's documented query for this alert (azure-monitor/logs/daily-cap).
+          // Keys on the OverQuota status token, not the prose around it.
+          query: '_LogOperation | where Category =~ "Ingestion" | where Detail contains "OverQuota"'
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
