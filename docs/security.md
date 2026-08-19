@@ -185,5 +185,7 @@ every namespace consuming it is permitted by one clause or the other.
 - **Cluster-admin access is a separate document.** The static admin certificate,
   why it cannot be disabled on this cluster, and what constrains it instead are in
   [cluster-access.md](cluster-access.md).
-- **Out of scope here**, each its own change: API-server audit retention and an
-  Alertmanager receiver.
+- **Out of scope here**: an Alertmanager receiver, so none of the above raises an
+  alarm when it stops working. API-server *mutations* are now audited off-cluster
+  ([decisions.md](decisions.md) entry 9) — but **reads are not**, in Kubernetes or in
+  Key Vault, so a secret being read leaves no trace either way.

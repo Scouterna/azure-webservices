@@ -18,6 +18,7 @@ say why rather than deleting it.
 | [6](#6-external-secrets-write-access-is-not-in-admin-and-the-store-is-scoped) | ESO write access is not in `admin`; the store is scoped | current |
 | [7](#7-the-vault-has-no-per-key-scoping) | The vault has no per-key scoping | accepted limit |
 | [8](#8-a-namespace-is-a-security-boundary-the-appproject-is-not-the-only-one) | A namespace is a security boundary; the AppProject bounds only GitOps | current |
+| [9](#9-audit-logging-is-kube-audit-admin-only-capped-and-off-cluster) | Audit logging is `kube-audit-admin` only, capped, and off-cluster | current |
 
 ---
 
@@ -195,3 +196,83 @@ not match exactly. `admin` permits `RoleBinding`, `Role`, `ServiceAccount` and
 statement of ownership, not purely a technical fence: creating those by hand is out
 of bounds and gets reverted. Closing the gap technically would need a
 `ValidatingAdmissionPolicy`, which is not deployed.
+
+## 9. Audit logging is `kube-audit-admin` only, capped, and off-cluster
+
+**Current.** A diagnostic setting on the cluster ships the `kube-audit-admin`
+category to a Log Analytics workspace in the durable infra RG, capped at 1 GB/day
+with 30-day retention.
+
+**Why off-cluster, in the durable RG.** An audit log exists to answer "what
+happened", including when what happened is the cluster being destroyed. Storing it
+inside the cluster, or in the cluster's own resource group, means the one event
+you most need it for takes it with it.
+
+**Why `kube-audit-admin` and not `kube-audit`.** `kube-audit-admin` drops
+non-mutating reads. `kube-audit` is the full firehose — several GB/day on an idle
+cluster — which on a metered workspace is the entire budget.
+
+Be clear about what that costs, because it is not merely noise: **reads are not
+recorded.** `kubectl get secrets -A -o yaml` — which retrieves the Sealed Secrets
+sealing key and every project credential — is a `get`/`list`, so it leaves no
+trace. Nor does a developer probing across a namespace boundary, whose 403s are
+also reads. So this records **who changed what, and who shelled into a pod**
+(`exec`, `attach`, `portforward` and `TokenRequest` are all `create`), and not who
+read what. Recovering the read side means auditing Key Vault, not raising this
+category — see "What this does not give".
+
+**Why not `guard`.** That category audits managed **Entra ID** authentication and
+Azure RBAC decisions. This cluster deliberately uses neither (decision 1), so it
+would emit nothing. Worth stating because `guard` is the standard recommendation
+and appears in most AKS hardening guides — it is simply not applicable here.
+
+**The cap loses data, deliberately.** At 1 GB/day, ingestion **stops** for the rest
+of the UTC day once the cap is hit, and the workspace keeps reporting healthy. That
+is an audit gap precisely when something is generating unusual API traffic — the
+moment you would most want the log. The alternative is an uncapped metered resource
+on a cluster with no spend alerting, which for a volunteer-run NGO is the worse
+failure. Raise `dailyQuotaGb` if that judgement is wrong; the trade is explicit
+rather than hidden.
+
+**It is also cheap to abuse, and that needs no Azure rights.** A developer with
+`admin` in one namespace can loop a mutating call — every request is logged — and
+fill 1 GB in minutes, after which everything they do is unrecorded until the UTC
+day rolls over. The flood itself is visible in the rows ingested before the cap,
+but only to someone looking. The Azure-side cap alert below is what makes it
+noticed rather than merely recorded.
+
+**30 days, because 31 is free.** Log Analytics includes 31 days of retention at no
+extra cost, so 30 is the longest retention with no per-GB-month charge. Longer is a
+deliberate spend, not a default.
+
+**What this does not give.** Attribution for the local admin certificate is still
+Azure-side only — requests arrive as `masterclient` whatever the audit log records
+(see [cluster-access.md](cluster-access.md)). And **Key Vault reads are not
+audited**: no diagnostic setting exists on the vault, so there is no record of which
+secrets were read from the cluster's root of trust. Given that this category cannot
+record Kubernetes reads either, that is the notable remaining gap — it is the half
+of the original finding this change does not close, and it stays listed in
+[maintenance.md](maintenance.md). **Nothing alerts on it yet, but that is not blocked on Alertmanager.** In-cluster
+alerting is (see [maintenance.md](maintenance.md)); this workspace is not. An Azure
+Monitor action group with an email receiver, plus a rule on the workspace's
+daily-cap event and an Activity Log alert on `diagnosticSettings/delete` and
+`workspaces/delete`, are all available today and cost nothing. Those two alerts are
+what would make this control trustworthy rather than merely present, and they are
+the obvious next step.
+
+**Reading the audit log is a separate grant.** `enableLogAccessUsingOnlyResourcePermissions`
+is `false`, so querying requires a role on the workspace itself — not merely `Reader`
+on the cluster. That matters because the same Azure rights that mint the admin
+certificate would otherwise also read the record of what it did.
+
+**Retention is shorter than realistic time-to-discovery.** With no detection in
+place, an incident is likely to surface incidentally, months later — by which time
+30 days of audit rows have expired. The Azure Activity Log that attributes
+certificate use is kept 90 days, three times longer. Raising this means per-GB-month
+interactive retention or a table-level archive; both are real spend, so the 30 days
+is a budget choice with a stated cost, not a claim that 30 days is sufficient.
+
+**This workspace is audit-dedicated.** Anything else pointed at it — Defender for
+Containers especially — would compete for the same 1 GB and could blind the audit
+log as a side effect of adding a security control. Give it its own workspace or
+recalculate the cap first.

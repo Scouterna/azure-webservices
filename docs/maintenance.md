@@ -233,11 +233,16 @@ choices already made. These are gaps that should close.
 
 | Gap | What it means today | What closes it |
 |---|---|---|
-| **No API-server audit retention** — no diagnostic settings on the cluster | `kube-audit-admin` and `guard` logs go nowhere, so "who did this" is unanswerable after the fact, whichever way they authenticated | `Microsoft.Insights/diagnosticSettings` → Log Analytics, with a retention period |
+| **No record of Key Vault secret reads** — no diagnostic setting on `infra/keyvault.bicep` | The vault is the cluster's root of trust, and `kube-audit-admin` cannot record reads either, so nothing shows which secrets were read or by whom | `Microsoft.Insights/diagnosticSettings` on the vault (`AuditEvent`) to the same workspace |
 | **Alertmanager has no receiver** | Alert rules exist and fire, but nothing leaves the cluster — including the governance alerts above and any future signal that a control has stopped working | A receiver (email/Slack/webhook) and a deliberate route |
 | **No image or manifest scanning in CI** — [`checks.yml`](../.github/workflows/checks.yml) validates YAML, placeholders and two security invariants only; images are pinned by tag, not digest | A compromised or vulnerable upstream tag is adopted on the next pull, silently | Trivy + kube-linter in CI; digest pinning with Renovate keeping digests current |
 
-The Alertmanager gap compounds the other two: several controls fail quietly
+API-server audit retention is no longer here: `kube-audit-admin` ships to a capped
+Log Analytics workspace ([decisions.md](decisions.md) entry 9). Two caveats keep the
+rows above: it records mutations, **not reads**, and nothing alerts on it — though
+for this workspace the useful alerts are Azure-side and do not wait on Alertmanager.
+
+The Alertmanager gap compounds the other: several controls fail quietly
 (a stalled `ExternalSecret`, a backup that archives nothing), and until something
 delivers alerts, "it would be noticed" is not true of any of them.
 
