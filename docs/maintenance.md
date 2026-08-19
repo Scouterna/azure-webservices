@@ -24,6 +24,7 @@ Based on each project's real release velocity and blast radius:
 |---|---|---|
 | **Quarterly** (fast-movers) | kube-prometheus-stack, Traefik, ArgoCD, Grafana/Loki/Alloy | Release often; chart-major bumps can change values. Review changelogs. |
 | **Semi-annual** (stable) | cert-manager, MinIO, CloudNativePG, Thanos, Headlamp, External Secrets, Gateway API CRDs | Slower cadence, fewer breaking changes. Bump the Gateway API CRDs in step with Traefik (see below). |
+| **Quarterly** (audit health) | the audit log pipeline | Confirm rows are still arriving and the daily cap has not been hit — `install.md` §11. The Azure alerts catch both faster, but this is the check that does not depend on them. |
 | **AKS Kubernetes** | the cluster | Patch upgrades are automatic (`autoUpgradeProfile: patch` in the Bicep). **Minor** upgrades (1.36→1.37) are manual, ~3×/year following the K8s release train — do them before the running minor goes out of AKS support. |
 
 ## Upgrade-sensitive components (read the changelog first)
