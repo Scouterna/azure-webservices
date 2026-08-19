@@ -17,7 +17,8 @@
 // Deploy (subscription is selected out-of-band via `az account set` / the RG;
 // no subscription ID lives in this repo):
 //   az deployment group create -g <rg> \
-//     -f infra/aks.bicep -p infra/env/webservices.bicepparam
+//     -f infra/main.bicep -p infra/env/webservices.bicepparam
+// (main.bicep is the entry point; the bicepparam declares `using '../main.bicep'`.)
 // =============================================================================
 
 @description('Cluster name. webservices-v2')
@@ -47,6 +48,12 @@ param osDiskSizeGB int = 128
 @description('SLA tier. Free = no SLA')
 @allowed(['Free', 'Standard'])
 param skuTier string = 'Free'
+
+@description('Name of the durable Log Analytics workspace that receives API-server audit logs (infra/loganalytics.bicep). It must already exist — docs/install.md §5b.')
+param auditWorkspaceName string
+
+@description('Resource group holding that workspace. Separate from the cluster RG so audit logs survive a teardown.')
+param auditWorkspaceResourceGroup string
 
 @description('Resource tags.')
 param tags object = {
@@ -139,6 +146,30 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
         upgradeSettings: {
           maxSurge: '33%'
         }
+      }
+    ]
+  }
+}
+
+// Ship API-server audit logs off the cluster. kube-audit-admin only, and no
+// `guard` (it audits Entra RBAC, which this cluster does not use). docs/decisions.md 9.
+resource auditWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+  name: auditWorkspaceName
+  scope: resourceGroup(auditWorkspaceResourceGroup)
+}
+
+resource auditDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'audit-to-log-analytics'
+  scope: aks
+  properties: {
+    workspaceId: auditWorkspace.id
+    // Dedicated = the AKSAuditAdmin table. Default lands rows in AzureDiagnostics,
+    // where the queries in install.md §11 find nothing. docs/decisions.md 9.
+    logAnalyticsDestinationType: 'Dedicated'
+    logs: [
+      {
+        category: 'kube-audit-admin'
+        enabled: true
       }
     ]
   }

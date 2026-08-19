@@ -89,10 +89,11 @@ rather than a fallback:
   Only rotating the cluster CA (`az aks rotate-certs`, disruptive) invalidates it,
   so a leaked `.kube-webservices` is a reason to rotate rather than merely to
   delete.
-- **In-cluster actions are unattributed regardless of path.** No API-server audit
-  log is shipped anywhere, so "who did this" is unanswerable whether they used SSO
-  or the certificate. That is a separate, open gap
-  ([maintenance.md](maintenance.md) lists it under not-yet-implemented).
+- **The audit log records the certificate's actions as `masterclient`.**
+  `kube-audit-admin` now ships off-cluster ([decisions.md](decisions.md) entry 9),
+  so SSO actions are attributable to a GitHub identity — but certificate requests
+  carry no person, whatever the log captures. Azure's record of who *minted* it
+  stays the only link to a human.
 - **If the identity model ever changes**, this decision is what to revisit — an
   Entra-integrated cluster could disable the certificate, at the cost of the
   volunteer-friendly GitHub identity that motivated the current design.

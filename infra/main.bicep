@@ -28,6 +28,12 @@ param nodeCount int = 1
 @description('Availability zones.')
 param zones string[] = ['1', '2', '3']
 
+@description('Durable Log Analytics workspace receiving API-server audit logs. Must exist before this deploys — docs/install.md §5b.')
+param auditWorkspaceName string
+
+@description('Resource group holding the audit workspace (the long-lived infra RG, not the cluster RG).')
+param auditWorkspaceResourceGroup string
+
 module aks 'aks.bicep' = {
   name: 'aks'
   params: {
@@ -38,6 +44,8 @@ module aks 'aks.bicep' = {
     vmSize: vmSize
     nodeCount: nodeCount
     zones: zones
+    auditWorkspaceName: auditWorkspaceName
+    auditWorkspaceResourceGroup: auditWorkspaceResourceGroup
   }
 }
 

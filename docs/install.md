@@ -41,6 +41,7 @@ LOCATION=swedencentral            # Azure region for everything here
 INFRA_RG=webservices-infra        # RG holding the Key Vault, identities, backup storage
 KEY_VAULT_NAME=kv-scouterna-webservices       # Key Vault name (globally unique, 3-24 chars)
 BACKUP_STORAGE_ACCOUNT=stwsv2backup              # backup storage account (globally unique, 3-24 lowercase alnum)
+LOG_WORKSPACE=log-webservices     # audit workspace (must match auditWorkspaceName in the bicepparam)
 
 # --- Identities (in $INFRA_RG; persist across rebuilds) ---
 ESO_IDENTITY=id-eso-webservices       # managed identity ESO authenticates as
@@ -80,7 +81,7 @@ az account set --subscription "$SUBSCRIPTION_ID"
 # Part 1 — Prerequisites (no cluster needed)
 
 Everything in Part 1 can be done before the cluster exists. On a **rebuild**, the
-durable pieces ($INFRA_RG, $KEY_VAULT_NAME, the identities, $BACKUP_STORAGE_ACCOUNT, the secrets) usually
+durable pieces ($INFRA_RG, $KEY_VAULT_NAME, the identities, $BACKUP_STORAGE_ACCOUNT, $LOG_WORKSPACE, the secrets) usually
 already exist and these steps are idempotent no-ops — safe to re-run.
 
 ## 1. vCPU quota (do this FIRST — it blocks the deploy)
@@ -285,6 +286,49 @@ az keyvault secret set --vault-name $KEY_VAULT_NAME --name backup-storage-accoun
 > like an empty container rather than a permission error. Leave the other
 > containers alone — `velero` and any `cnpg-<project>` hold live backups.
 
+## 5b. Audit log workspace
+
+The API server's audit log is shipped to a Log Analytics workspace in `$INFRA_RG`,
+so it survives a cluster teardown — including one that is itself what you are
+investigating. Do this **before §7a** — the cluster carries a diagnostic setting
+that references this workspace by name.
+
+```bash
+az deployment group create -g $INFRA_RG -f infra/loganalytics.bicep \
+  -p workspaceName=$LOG_WORKSPACE
+```
+
+> **What a wrong name actually does.** The cluster's reference is `existing`, which
+> compiles to a computed resource ID with no lookup — so `what-if` **cannot** detect
+> a mismatch, and a name that happens to match some *other* workspace deploys
+> happily and ships the audit log there. A name matching nothing fails at deploy,
+> but **not atomically**: the cluster is created first, so §7a reports Failed with a
+> running, audit-less cluster. Fix the name and re-run §7a; do not tear anything
+> down. The only proof this works is the §11 query.
+
+Idempotent, so a rebuild re-runs it as a no-op. **Assert** both the name and the
+resource group — the name alone is not enough, because §0 invites overriding
+`$INFRA_RG` for a test deploy while the bicepparam pins the RG:
+
+```bash
+grep -q "auditWorkspaceName = '$LOG_WORKSPACE'"          infra/env/webservices.bicepparam \
+  && grep -q "auditWorkspaceResourceGroup = '$INFRA_RG'" infra/env/webservices.bicepparam \
+  && echo "audit workspace OK: $LOG_WORKSPACE in $INFRA_RG" \
+  || echo "MISMATCH — bicepparam says: $(grep auditWorkspace infra/env/webservices.bicepparam | tr '\n' ' ')"
+
+az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
+  --query '{name:name, retention:retentionInDays, capGb:workspaceCapping.dailyQuotaGb, ingestion:workspaceCapping.dataIngestionStatus}' -o table
+```
+
+If you overrode `$INFRA_RG`, add `-p auditWorkspaceResourceGroup=$INFRA_RG` to the
+§7a deployment alongside the existing `-p clusterName=$CLUSTER`.
+
+> **It is capped at 1 GB/day, and the cap loses data.** Ingestion stops for the
+> rest of the UTC day once hit — that protects the budget and is the right default
+> for this cluster, but it means an audit gap exactly when something is generating
+> a lot of API traffic. Raise `dailyQuotaGb` deliberately if that trade-off is
+> wrong for you; the reasoning is in [decisions.md](decisions.md) entry 9.
+
 ## 6. Write the bootstrap secrets to Key Vault
 
 **Key Vault is the source of truth.** ESO's `ExternalSecret`s (in
@@ -396,7 +440,7 @@ az deployment group create  -g $CLUSTER_RG -f infra/main.bicep -p infra/env/webs
 `MC_<cluster-rg>_<cluster>_<location>` by Azure) for the VMs/disks/LB; you don't
 create it, and `az group delete -g $CLUSTER_RG` removes both.
 
-A good `what-if` ends with `Resource changes: 1 to create.` and a
+A good `what-if` ends with `Resource changes: 2 to create.` and a
 `+ Microsoft.ContainerService/managedClusters/<cluster>` block. Deploy takes
 ~5–10 min.
 
@@ -929,6 +973,70 @@ kubectl -n velero get backupstoragelocation default   # -> Available
 If an `ExternalSecret` starts failing only *after* this policy applies, it was
 silently falling back to the node identity through IMDS — fix the federated
 credential (§8), don't widen the policy.
+
+### Audit logs are actually arriving
+
+The diagnostic setting existing is not the same as events landing — a wrong
+workspace, a hit daily cap, or a category that emits nothing all look identical
+from the cluster side. Query the workspace, which is the only thing that proves it:
+
+```bash
+az monitor diagnostic-settings list --resource "$(az aks show -g $CLUSTER_RG -n $CLUSTER --query id -o tsv)" \
+  --query "value[].{name:name, table:logAnalyticsDestinationType, categories:logs[?enabled].category}" -o json
+
+WORKSPACE_GUID=$(az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE --query customerId -o tsv)
+az monitor log-analytics query --workspace "$WORKSPACE_GUID" \
+  --analytics-query "AKSAuditAdmin | summarize events=count(), latest=max(TimeGenerated)" -o table
+```
+
+`events` must be non-zero and `latest` within the last few minutes. Anything you
+have done with `kubectl` in §11 should appear. Expect a **lag of up to ~15 minutes**
+on the first events after the setting is created — an empty result immediately after
+§7a is normal, an empty result an hour later is not.
+
+If it stays empty, check the cap has not been hit — a capped workspace reports
+healthy and silently drops everything. The control plane answers this directly,
+without needing the data plane to be working:
+
+```bash
+az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
+  --query workspaceCapping.dataIngestionStatus -o tsv   # RespectQuota | ApproachingQuota | OverQuota
+```
+
+**Once rows are arriving, set the archive.** The `AKSAuditAdmin` table only exists
+after the diagnostic setting has created it, which is why this is here and not in
+§5b. 30 days stay interactive; the rest of the year is archived, because an incident
+here will surface late and 30 days would usually have expired by then
+([decisions.md](decisions.md) entry 9):
+
+```bash
+az monitor log-analytics workspace table update -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --retention-time 30 --total-retention-time 365
+
+az monitor log-analytics workspace table show -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --query '{interactive:retentionInDays, total:totalRetentionInDays}' -o table
+```
+
+Expect `30` and `365`. A `TableNotFound` error means no audit row has landed yet —
+go back to the query above; the table is created by the first event, not by §5b.
+Archived rows need a search job or restore to query, not a plain `query` call.
+
+**Once rows are arriving, settle one open question:** whether audit records carry
+Secret contents. `AKSAuditAdmin` has a `RequestObject` column and this category
+logs the `create`/`update` verbs External Secrets uses, so the sealing key and
+every project credential may be in the workspace in plaintext.
+
+```bash
+az monitor log-analytics query --workspace "$WORKSPACE_GUID" --analytics-query \
+  'AKSAuditAdmin
+   | where ObjectRef.resource == "secrets" and Verb in ("create","update","patch")
+   | project TimeGenerated, Verb, Level, RequestObject
+   | take 5' -o json
+```
+
+If `RequestObject` is populated with the Secret's `data`, the workspace holds
+credentials and its RBAC must match the vault's — record the answer in
+[decisions.md](decisions.md) entry 9 either way, and see the mitigation there.
+An empty result means only that no Secret has been written since the diagnostic
+setting was created; re-run it after §10 has materialised the infra secrets.
 
 ### Dual-stack DNS
 
