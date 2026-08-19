@@ -984,6 +984,25 @@ az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
   --query workspaceCapping.dataIngestionStatus -o tsv   # RespectQuota | ApproachingQuota | OverQuota
 ```
 
+**Once rows are arriving, settle one open question:** whether audit records carry
+Secret contents. `AKSAuditAdmin` has a `RequestObject` column and this category
+logs the `create`/`update` verbs External Secrets uses, so the sealing key and
+every project credential may be in the workspace in plaintext.
+
+```bash
+az monitor log-analytics query --workspace "$WORKSPACE_GUID" --analytics-query \
+  'AKSAuditAdmin
+   | where ObjectRef.resource == "secrets" and Verb in ("create","update","patch")
+   | project TimeGenerated, Verb, Level, RequestObject
+   | take 5' -o json
+```
+
+If `RequestObject` is populated with the Secret's `data`, the workspace holds
+credentials and its RBAC must match the vault's — record the answer in
+[decisions.md](decisions.md) entry 9 either way, and see the mitigation there.
+An empty result means only that no Secret has been written since the diagnostic
+setting was created; re-run it after §10 has materialised the infra secrets.
+
 ### Dual-stack DNS
 
 The cluster is dual-stack, so the Traefik LoadBalancer has **both** an IPv4 and an

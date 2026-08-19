@@ -260,10 +260,42 @@ daily-cap event and an Activity Log alert on `diagnosticSettings/delete` and
 what would make this control trustworthy rather than merely present, and they are
 the obvious next step.
 
+**The workspace may contain secret material, and is treated as though it does.**
+`AKSAuditAdmin` has `RequestObject` and `ResponseObject` columns — "Kubernetes API
+object from the request in object format" — and a `Level` column whose values
+include `RequestResponse`. This category records `create`, `update` and `patch`,
+which are exactly the verbs External Secrets uses to materialise a Secret. If AKS
+populates those columns for `secrets`, then the Sealed Secrets private key, MinIO's
+root credentials and every project's PostgreSQL password are in this workspace in
+plaintext — base64 is an encoding, not encryption — and read access to it is
+equivalent to read access to every secret in the cluster.
+
+**Whether it actually does is unverified**, and deliberately recorded as open
+rather than assumed either way. The columns and the audit level are documented;
+what AKS's managed audit policy emits for `secrets` on this cluster is not, and
+there is no workspace yet to query. Settle it once §5b has run:
+
+```kusto
+AKSAuditAdmin
+| where ObjectRef.resource == "secrets" and Verb in ("create","update","patch")
+| project TimeGenerated, Verb, ObjectRef, Level, RequestObject
+| take 5
+```
+
+If `RequestObject` carries the Secret's `data`, either drop it at ingestion with a
+workspace transformation — `AKSAuditAdmin` supports DCR transformations, so the
+column can be redacted for `ObjectRef.resource == "secrets"` before it is
+stored — or accept it and say so here, in which case the workspace is a
+secret-tier resource and its RBAC has to match the vault's. Amend this entry with
+the answer rather than leaving the question implicit.
+
 **Reading the audit log is a separate grant.** `enableLogAccessUsingOnlyResourcePermissions`
 is `false`, so querying requires a role on the workspace itself — not merely `Reader`
 on the cluster. That matters because the same Azure rights that mint the admin
-certificate would otherwise also read the record of what it did.
+certificate would otherwise also read the record of what it did — and, given the
+paragraph above, possibly the secrets themselves. Until the query settles that,
+this setting is load-bearing rather than merely conservative, and should not be
+relaxed to `true` for query convenience.
 
 **Retention is shorter than realistic time-to-discovery.** With no detection in
 place, an incident is likely to surface incidentally, months later — by which time
