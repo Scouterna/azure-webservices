@@ -39,3 +39,9 @@ Thumbs.db
 # Cluster secret/config dumps (never commit)
 scoutview.env
 *.env
+
+# Security review notes — a roadmap of unmitigated weaknesses in a live cluster.
+# Useful to hold locally, an attacker's checklist in a public repo. Keep it out
+# until the findings are closed and it has been scrubbed.
+docs/security-review.md
+docs/security-review-*.md
