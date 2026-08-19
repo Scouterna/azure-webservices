@@ -984,6 +984,22 @@ az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
   --query workspaceCapping.dataIngestionStatus -o tsv   # RespectQuota | ApproachingQuota | OverQuota
 ```
 
+**Once rows are arriving, set the archive.** The `AKSAuditAdmin` table only exists
+after the diagnostic setting has created it, which is why this is here and not in
+§5b. 30 days stay interactive; the rest of the year is archived, because an incident
+here will surface late and 30 days would usually have expired by then
+([decisions.md](decisions.md) entry 9):
+
+```bash
+az monitor log-analytics workspace table update -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --retention-time 30 --total-retention-time 365
+
+az monitor log-analytics workspace table show -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --query '{interactive:retentionInDays, total:totalRetentionInDays}' -o table
+```
+
+Expect `30` and `365`. A `TableNotFound` error means no audit row has landed yet —
+go back to the query above; the table is created by the first event, not by §5b.
+Archived rows need a search job or restore to query, not a plain `query` call.
+
 **Once rows are arriving, settle one open question:** whether audit records carry
 Secret contents. `AKSAuditAdmin` has a `RequestObject` column and this category
 logs the `create`/`update` verbs External Secrets uses, so the sealing key and

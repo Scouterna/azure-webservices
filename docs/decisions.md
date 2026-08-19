@@ -241,9 +241,19 @@ day rolls over. The flood itself is visible in the rows ingested before the cap,
 but only to someone looking. The Azure-side cap alert below is what makes it
 noticed rather than merely recorded.
 
-**30 days, because 31 is free.** Log Analytics includes 31 days of retention at no
-extra cost, so 30 is the longest retention with no per-GB-month charge. Longer is a
-deliberate spend, not a default.
+**30 days interactive, one year archived.** Log Analytics includes 31 days of
+interactive retention at no extra cost, so 30 is the longest queryable window with
+no per-GB-month charge. Beyond that the rows move to **archive** for a total of 365
+days: an incident here will surface incidentally and late (see below), and archive
+storage is a fraction of ingestion cost, so a year of recoverable history is cheap
+insurance. Searching the archive needs a search job or restore rather than a plain
+query — slower, but it exists.
+
+This is applied as a step in [install.md](install.md) §11 rather than in
+`loganalytics.bicep`, because the resource-specific `AKSAuditAdmin` table does not
+exist until the cluster's diagnostic setting has created it — and §5b runs before
+the cluster does. It could move into Bicep if the table turns out to be
+pre-configurable; nobody has established that.
 
 **What this does not give.** Attribution for the local admin certificate is still
 Azure-side only — requests arrive as `masterclient` whatever the audit log records
@@ -297,12 +307,13 @@ paragraph above, possibly the secrets themselves. Until the query settles that,
 this setting is load-bearing rather than merely conservative, and should not be
 relaxed to `true` for query convenience.
 
-**Retention is shorter than realistic time-to-discovery.** With no detection in
-place, an incident is likely to surface incidentally, months later — by which time
-30 days of audit rows have expired. The Azure Activity Log that attributes
-certificate use is kept 90 days, three times longer. Raising this means per-GB-month
-interactive retention or a table-level archive; both are real spend, so the 30 days
-is a budget choice with a stated cost, not a claim that 30 days is sufficient.
+**Why a year and not 30 days.** With no detection in place, an incident will
+surface incidentally — a project reports something odd, a bill looks wrong, a
+credential turns up somewhere — which is routinely months, not weeks. A 30-day
+window would mean that in the most likely timeline the answer to "who did this" had
+already been deleted, while the control still read as present. It would also be
+shorter than the 90-day Azure Activity Log it exists to be correlated with. The
+archive closes both gaps for a small fraction of the ingestion cost.
 
 **This workspace is audit-dedicated.** Anything else pointed at it — Defender for
 Containers especially — would compete for the same 1 GB and could blind the audit
