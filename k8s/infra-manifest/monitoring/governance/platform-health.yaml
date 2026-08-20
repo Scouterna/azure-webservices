@@ -1,0 +1,81 @@
+# Alerts for the platform's OWN controls failing. Every one of these fails quietly
+# by default: the object stays Healthy, the app stays Synced, and nothing is lost
+# until someone needs it. Rationale and the scrape targets each depends on:
+# docs/decisions.md entry 11.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-health
+  namespace: monitoring
+  labels:
+    release: kps          # picked up by the kube-prometheus-stack Prometheus
+spec:
+  groups:
+    - name: platform-controls
+      rules:
+        - alert: ExternalSecretNotReady
+          # A stalled ExternalSecret keeps serving the LAST synced value, so the
+          # workload keeps working until a rotation or a rebuild — then does not.
+          expr: |
+            externalsecret_status_condition{condition="Ready",status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} is not syncing"
+            description: >-
+              It has been un-Ready for 15m. The Secret still holds the last value it
+              fetched, so nothing has broken yet. Check the ClusterSecretStore
+              conditions permit this namespace (docs/security.md §3) and that the
+              key exists in the vault.
+
+        - alert: VeleroBackupFailing
+          expr: |
+            increase(velero_backup_failure_total[6h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Velero backup schedule {{ $labels.schedule }} is failing"
+            description: "A backup has failed in the last 6h. Restores are the only thing this protects, so it is invisible until one is needed."
+
+        - alert: VeleroNoRecentBackup
+          # The quieter failure: not errors, just nothing running at all.
+          expr: |
+            time() - velero_backup_last_successful_timestamp > 36 * 3600
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No successful Velero backup for {{ $labels.schedule }} in 36h"
+            description: "The daily schedule has not completed in 36h. Nothing reports this except this alert."
+
+        - alert: PostgresWALArchivingFailing
+          # WAL archiving is what makes point-in-time recovery possible. A Cluster
+          # can serve queries perfectly while archiving nothing. Metric name taken
+          # from the cloudnative-pg dashboard, NOT the cnpg_collector_* family —
+          # the collector prefix does not apply to the archiver metrics.
+          expr: |
+            increase(cnpg_pg_stat_archiver_failed_count[1h]) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Shared Postgres is failing to archive WAL"
+            description: >-
+              The database is up; its backups are not. Point-in-time recovery is
+              degraded for as long as this persists — see docs/maintenance.md.
+
+        - alert: ArgoCDAppNotSynced
+          # If ArgoCD stops converging, every control in this repo silently stops
+          # being enforced — including the ones that self-heal drift.
+          expr: |
+            argocd_app_info{sync_status!="Synced"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} is {{ $labels.sync_status }}"
+            description: >-
+              GitOps has stopped converging for this app. Anything it manages is no
+              longer guaranteed to match Git, including selfHeal.

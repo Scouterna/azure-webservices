@@ -235,17 +235,19 @@ choices already made. These are gaps that should close.
 | Gap | What it means today | What closes it |
 |---|---|---|
 | **No record of Key Vault secret reads** — no diagnostic setting on `infra/keyvault.bicep` | The vault is the cluster's root of trust, and `kube-audit-admin` cannot record reads either, so nothing shows which secrets were read or by whom | `Microsoft.Insights/diagnosticSettings` on the vault (`AuditEvent`) to the same workspace |
-| **Alertmanager has no receiver** | Alert rules exist and fire, but nothing leaves the cluster — including the governance alerts above and any future signal that a control has stopped working | A receiver (email/Slack/webhook) and a deliberate route |
 | **No image or manifest scanning in CI** — [`checks.yml`](../.github/workflows/checks.yml) validates YAML, placeholders and two security invariants only; images are pinned by tag, not digest | A compromised or vulnerable upstream tag is adopted on the next pull, silently | Trivy + kube-linter in CI; digest pinning with Renovate keeping digests current |
 
-API-server audit retention is no longer here: `kube-audit-admin` ships to a capped
-Log Analytics workspace ([decisions.md](decisions.md) entry 9). Two caveats keep the
-rows above: it records mutations, **not reads**, and nothing alerts on it — though
-for this workspace the useful alerts are Azure-side and do not wait on Alertmanager.
+Two entries have left this list. API-server audit retention: `kube-audit-admin`
+ships to a capped Log Analytics workspace ([decisions.md](decisions.md) entry 9) —
+though it records mutations, **not reads**, which is why the Key Vault row above
+stays. And Alertmanager now has a Slack receiver plus rules for the platform's own
+controls failing ([decisions.md](decisions.md) entry 11), so a stalled
+`ExternalSecret` or a backup that stops running is no longer silent.
 
-The Alertmanager gap compounds the other two: several controls fail quietly
-(a stalled `ExternalSecret`, a backup that archives nothing), and until something
-delivers alerts, "it would be noticed" is not true of any of them.
+Both remaining gaps are about *visibility of reads and of supply chain*, not
+delivery: alerts now reach Slack, so "it would be noticed" is true of a control
+that breaks. It is still not true of a secret being read — in Kubernetes or in the
+vault — which is what the first row is for.
 
 ## Accepted risks (revisit deliberately)
 
