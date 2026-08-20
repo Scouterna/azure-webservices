@@ -113,6 +113,14 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
       podCidrs: ['10.244.0.0/16', 'fdbc:2e46:9934:1::/64']
       serviceCidrs: ['10.0.0.0/16', 'fdbc:2e46:9934:2::/108']
       dnsServiceIP: '10.0.0.10' // must fall inside the first serviceCidrs entry
+      // countIPv6 defaults to 0. Undeclared, a redeploy silently drops the v6
+      // outbound IP and IPv6 egress with it. docs/decisions.md entry 10.
+      loadBalancerProfile: {
+        managedOutboundIPs: {
+          count: 1
+          countIPv6: 1
+        }
+      }
     }
 
     // Key Vault CSI addon — kept available as an opt-in escape hatch for

@@ -19,6 +19,7 @@ say why rather than deleting it.
 | [7](#7-the-vault-has-no-per-key-scoping) | The vault has no per-key scoping | accepted limit |
 | [8](#8-a-namespace-is-a-security-boundary-the-appproject-is-not-the-only-one) | A namespace is a security boundary; the AppProject bounds only GitOps | current |
 | [9](#9-audit-logging-is-kube-audit-admin-only-capped-and-off-cluster) | Audit logging is `kube-audit-admin` only, capped, and off-cluster | current |
+| [10](#10-the-template-declares-the-outbound-ip-counts) | The template declares the outbound IP counts | current |
 
 ---
 
@@ -334,3 +335,40 @@ archive closes both gaps for a small fraction of the ingestion cost.
 Containers especially — would compete for the same 1 GB and could blind the audit
 log as a side effect of adding a security control. Give it its own workspace or
 recalculate the cap first.
+
+## 10. The template declares the outbound IP counts
+
+**Current.** `aks.bicep` sets `networkProfile.loadBalancerProfile.managedOutboundIPs`
+to `count: 1` and `countIPv6: 1`, matching what the cluster is actually running.
+
+**Why it has to be declared.** The cluster is dual-stack, and ARM's default for
+`countIPv6` is **0** — outbound IPv6 is opt-in, unlike `count`, which defaults to
+1. Azure allocated the v6 outbound IP when the cluster was created, but the
+template never mentioned it. An incremental redeploy therefore reset it to the
+default: `what-if` against the live test cluster showed
+`managedOutboundIPs.countIPv6: 1 → 0`, which drops the cluster's IPv6 outbound
+address and IPv6 egress with it, while AAAA records still resolve to the cluster.
+
+**Why that mattered more than it looks.** The redeploy path is routine, not
+exceptional — `aks.bicep`'s own `nodeCount` description calls bumping it and
+redeploying *the* way to add a node (autoscaling is deliberately off), and
+enabling the audit diagnostic setting on an existing cluster needs the same
+redeploy. So the trap sat on the ordinary
+scaling path, and would have been discovered as broken IPv6 egress some time after
+an unrelated change.
+
+**The general rule this is an instance of.** *A property Azure defaults and the
+template does not declare is not stable — it is whatever the last write said.*
+`what-if` is what surfaces it, and only against a **live** cluster; `bicep build`
+cannot, since nothing is syntactically wrong. Worth running before any redeploy of
+an existing cluster, and worth reading past the noise: read-only computed fields
+like `effectiveOutboundIPs` always show as `Delete` and mean nothing, while a
+`Modify` with a concrete before/after is real.
+
+**Not addressed here:** the other properties in the same `what-if` output
+(`nodeResourceGroup`, `storageProfile`, `windowsProfile`, `identityProfile` and
+similar) also appear as `Delete`. Those are Azure-defaulted and left alone by an
+incremental deploy — verified by the same what-if run, which reported no change to
+them once `countIPv6` was declared. If a future what-if shows one of them as a
+`Modify`, treat it the way this one was treated.
+
