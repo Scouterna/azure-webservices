@@ -38,7 +38,7 @@ CLUSTER_RG=webservices-v2         # resource group that will hold the cluster
 LOCATION=swedencentral            # Azure region for everything here
 
 # --- Durable infrastructure (survives cluster teardown/rebuild) ---
-INFRA_RG=webservices-infra        # RG holding the Key Vault, identities, backup storage
+INFRA_RG=webservices-infra        # durable RG: Key Vault, identities, backup storage, audit workspace + alerts
 KEY_VAULT_NAME=kv-scouterna-webservices       # Key Vault name (globally unique, 3-24 chars)
 BACKUP_STORAGE_ACCOUNT=stwsv2backup              # backup storage account (globally unique, 3-24 lowercase alnum)
 LOG_WORKSPACE=log-webservices     # audit workspace (must match auditWorkspaceName in the bicepparam)
@@ -349,7 +349,8 @@ notice to a new address, and until someone acts on it the receiver exists while
 delivering nothing:
 
 ```bash
-az monitor action-group show -g $INFRA_RG -n audit-alerts   --query "emailReceivers[].{name:name, address:emailAddress, status:status}" -o table
+az monitor action-group show -g $INFRA_RG -n audit-alerts \
+  --query "emailReceivers[].{name:name, address:emailAddress, status:status}" -o table
 ```
 
 Expect `status: Enabled`. `Disabled` means the confirmation mail was not accepted —
@@ -1041,10 +1042,18 @@ here will surface late and 30 days would usually have expired by then
 ([decisions.md](decisions.md) entry 9):
 
 ```bash
-az monitor log-analytics workspace table update -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --retention-time 30 --total-retention-time 365
+az monitor log-analytics workspace table update -g $INFRA_RG \
+  --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin \
+  --retention-time 30 --total-retention-time 365
 
-az monitor log-analytics workspace table show -g $INFRA_RG   --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin   --query '{interactive:retentionInDays, total:totalRetentionInDays}' -o table
+az monitor log-analytics workspace table show -g $INFRA_RG \
+  --workspace-name $LOG_WORKSPACE -n AKSAuditAdmin \
+  --query '{interactive:retentionInDays, total:totalRetentionInDays}' -o table
 ```
+
+Do not defer this. Retention is **not retroactive**, so rows that age out before the
+archive is set are gone for good — each day skipped on a running cluster is a day of
+history quietly lost.
 
 Expect `30` and `365`. A `TableNotFound` error means no audit row has landed yet —
 go back to the query above; the table is created by the first event, not by §5b.

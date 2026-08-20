@@ -19,8 +19,6 @@ param vmSize = 'Standard_D4s_v6' // Intel, 4 vCPU / 16 GB, 12 data disks — dis
 param nodeCount = 1              // Manual scaling: bump this + redeploy to add nodes.
 param zones = ['1', '2', '3']
 
-// --- Audit logging ---
-// The workspace lives in the durable RG so audit logs outlive the cluster.
-// Names, not identifiers — nothing here is a secret. docs/decisions.md entry 9.
+// --- Audit logging (docs/decisions.md 9) ---
 param auditWorkspaceName = 'log-webservices'
 param auditWorkspaceResourceGroup = 'webservices-infra'

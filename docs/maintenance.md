@@ -198,7 +198,7 @@ As of the initial build:
 
 | Component | Pin |
 |---|---|
-| AKS Kubernetes | 1.36.2 |
+| AKS Kubernetes | 1.36 (minor alias — the patch channel owns the patch) |
 | ArgoCD | v3.4.5 |
 | cert-manager | v1.21.0 |
 | Traefik | 41.0.2 (v3.7) |
