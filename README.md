@@ -50,14 +50,15 @@ ArgoCD**, so the whole platform can be torn down and rebuilt from this repo.
 ```
 
 The cluster is **AKS** in **Sweden Central**: a single `Standard_D4s_v6` node
-(4 vCPU / 16 GB, manual scaling), Kubernetes 1.36.2, **Cilium** eBPF dataplane
-enforcing NetworkPolicy, Workload Identity + OIDC, and the Key Vault CSI add-on.
-See [`infra/aks.bicep`](infra/aks.bicep).
+(4 vCPU / 16 GB, manual scaling), Kubernetes **1.36** (the minor only — the patch
+channel owns the patch level), **Cilium** eBPF dataplane enforcing NetworkPolicy,
+Workload Identity + OIDC, and the Key Vault CSI add-on. See
+[`infra/aks.bicep`](infra/aks.bicep).
 
 What the cluster actually enforces today — one cluster-wide egress deny, baseline
-Pod Security on project namespaces, and no default-deny baseline yet — is in
-[docs/security.md](docs/security.md), with the reasoning behind each choice in
-[docs/decisions.md](docs/decisions.md).
+Pod Security on project namespaces, API-server audit logs shipped off-cluster, and
+no default-deny baseline yet — is in [docs/security.md](docs/security.md), with the
+reasoning behind each choice in [docs/decisions.md](docs/decisions.md).
 
 Storage is in-cluster and portable: **MinIO** for S3-compatible object storage
 (backs Loki, Thanos, and backups) and **CloudNativePG** for PostgreSQL — no Azure
@@ -100,8 +101,11 @@ ArgoCD multi-source pattern), so upgrades are a version bump.
 ```
 infra/                     Bicep — the only Azure-specific layer
   aks.bicep                the cluster
-  keyvault.bicep           durable Key Vault (separate, long-lived RG)
-  main.bicep               orchestrator
+  main.bicep               orchestrator (deploy this, not aks.bicep)
+  keyvault.bicep           durable Key Vault        }  separate, long-lived RG;
+  backup-storage.bicep     durable backup storage   }  each deployed standalone,
+  loganalytics.bicep       durable audit workspace  }  so they survive a
+  alerts.bicep             audit alerting           }  cluster teardown
   env/webservices.bicepparam  cluster params (no secrets — committed)
 
 k8s/
@@ -127,8 +131,8 @@ The whole build is one runbook: **[docs/install.md](docs/install.md)** — from 
 empty subscription to a running cluster, as a single continuous shell session. It
 captures every step and gotcha, ordered by dependency: prerequisites that need no
 cluster first (quota, GitHub OAuth app, Key Vault, identities, secrets, backup
-storage), then provisioning, then the cluster-derived wiring, then bootstrapping
-ArgoCD.
+storage, audit workspace + alerting), then provisioning, then the cluster-derived
+wiring, then bootstrapping ArgoCD.
 
 The common services are installed and managed **only** by ArgoCD — no manual
 `helm install`. `k8s/argocd/infra-root-app.yaml` manages everything from `main`.
@@ -190,10 +194,12 @@ touchpoints are few and isolated:
 | `disk.csi.azure.com` StorageClass | `cluster-infra/storageclass/` | Change the provisioner; keep the class names |
 | LoadBalancer annotations | `traefik/values.yaml` | Provider's LB annotations, or MetalLB |
 | Secrets backend (Key Vault) | External Secrets `ClusterSecretStore` | Swap the store (Vault/AWS/GCP); `ExternalSecret`s unchanged |
+| Audit logs + alerting | `infra/loganalytics.bicep`, `infra/alerts.bicep`, the diagnostic setting in `aks.bicep` | No portable equivalent — the API-server audit feed is the provider's. Re-point at the new platform's log sink |
 
 In-cluster MinIO + CloudNativePG mean **no Azure data PaaS**. The residual Azure
-surface is one Bicep template, one StorageClass string, a couple of LB
-annotations, and one secret-store object.
+surface is the `infra/` Bicep layer (the cluster plus four standalone durable
+resources), one StorageClass string, a couple of LB annotations, and one
+secret-store object. Everything under `k8s/` moves unchanged.
 
 ---
 
@@ -201,5 +207,7 @@ annotations, and one secret-store object.
 
 The cluster and every common service have been built and validated end-to-end,
 including a full **teardown + rebuild from the docs** and a full **ArgoCD
-bring-up from Git**. Backups (Velero → MinIO, plus CloudNativePG's own backups)
-are the next planned addition.
+bring-up from Git**. Backups are in place — Velero to durable Azure Blob on two
+schedules, plus CloudNativePG's own base backups and WAL archiving (see
+[docs/maintenance.md](docs/maintenance.md)). What is still open is tracked under
+[Not yet implemented](docs/maintenance.md#not-yet-implemented).

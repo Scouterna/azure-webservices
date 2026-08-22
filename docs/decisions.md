@@ -256,6 +256,13 @@ exist until the cluster's diagnostic setting has created it — and §5b runs be
 the cluster does. It could move into Bicep if the table turns out to be
 pre-configurable; nobody has established that.
 
+**Retention is not retroactive, which makes that step matter more than it looks.**
+Raising retention later does not recover rows that have already aged out — they are
+gone. So the §11 step is not tidying-up to be done eventually: every day it is
+deferred on a running cluster silently spends a day of history the archive was
+supposed to keep. On a rebuild it is durable, since the workspace outlives the
+cluster and the table setting persists with it.
+
 **What this does not give.** Attribution for the local admin certificate is still
 Azure-side only — requests arrive as `masterclient` whatever the audit log records
 (see [cluster-access.md](cluster-access.md)). And **Key Vault reads are not
@@ -322,6 +329,11 @@ certificate would otherwise also read the record of what it did — and, given t
 paragraph above, possibly the secrets themselves. Until the query settles that,
 this setting is load-bearing rather than merely conservative, and should not be
 relaxed to `true` for query convenience.
+
+Follow that through when granting access: **treat read on this workspace as read on
+every secret in the cluster**, and hand it out on that basis — the same bar as a
+role on the Key Vault, not the bar for a monitoring dashboard. A year of archived
+rows widens that, not narrows it.
 
 **Why a year and not 30 days.** With no detection in place, an incident will
 surface incidentally — a project reports something odd, a bill looks wrong, a

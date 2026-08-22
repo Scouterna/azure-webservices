@@ -22,7 +22,9 @@ param workspaceName string
 @description('Azure region.')
 param location string = resourceGroup().location
 
-@description('Interactive retention in days. docs/decisions.md 9.')
+// The 365-day archive is set per-table in install.md §11, not here — the table
+// does not exist until the cluster's diagnostic setting creates it.
+@description('Interactive retention in days. Archive is separate — docs/decisions.md 9.')
 @minValue(30)
 @maxValue(730)
 param retentionInDays int = 30
