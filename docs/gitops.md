@@ -124,8 +124,12 @@ hand with `kubectl` or `helm` is a supported route. See
 ## What happens when you commit
 
 1. You push to `main`. Nothing has changed in the cluster yet.
-2. ArgoCD polls the repo (roughly every three minutes) or reacts to a webhook. The
-   affected Application goes `OutOfSync`.
+2. ArgoCD notices on its next poll. The affected Application goes `OutOfSync`.
+   **Polling is the only trigger here** — no repository webhook is configured, so
+   a push is never pushed *to* the cluster. The interval is ArgoCD's
+   `timeout.reconciliation`, left at its 180s default (`argocd-cm` sets no
+   override), so expect up to about three minutes. To not wait, force a refresh:
+   [argocd.md](argocd.md).
 3. With `automated` sync — which the infra Applications have — it applies the
    change and returns to `Synced`. With `selfHeal: true` it will also revert
    anything changed in the cluster by hand.
