@@ -68,8 +68,8 @@ rebuild, which is why it is backed up weekly rather than daily. A project needin
 persistent state uses the shared PostgreSQL or a PersistentVolumeClaim — see
 [onboarding.md](docs/onboarding.md).
 
-Persistent volumes use a cheap StandardSSD StorageClass by default, with a
-Premium class available opt-in.
+Persistent volumes use a cheap StandardSSD StorageClass by default; a Premium
+class is available for workloads that opt in.
 
 ### Common services
 

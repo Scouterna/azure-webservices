@@ -1,6 +1,7 @@
-# Wave 1 — MinIO (object storage; backs Loki, Thanos, backups). Needs a
-# StorageClass (wave 0). The minio-root secret is seeded out of band (bootstrap)
-# or, on the real cluster, via an ExternalSecret.
+# Wave 1 — MinIO (object storage; backs Loki and Thanos only — Velero backs up to
+# Azure Blob, and this is not project storage). Needs a StorageClass (wave 0).
+# The minio-root secret is seeded out of band (bootstrap) or, on the real
+# cluster, via an ExternalSecret.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
