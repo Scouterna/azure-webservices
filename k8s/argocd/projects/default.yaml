@@ -1,0 +1,14 @@
+# ArgoCD creates `default` at startup permitting any repo, any namespace and any
+# cluster-scoped kind. It cannot be deleted, so it is emptied here instead and
+# adopted by the argocd-projects app. docs/decisions.md entry 13.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  description: Deliberately empty — every Application names a real project.
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist: []

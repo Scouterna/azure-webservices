@@ -21,6 +21,8 @@ say why rather than deleting it.
 | [9](#9-audit-logging-is-kube-audit-admin-only-capped-and-off-cluster) | Audit logging is `kube-audit-admin` only, capped, and off-cluster | current |
 | [10](#10-the-template-declares-the-outbound-ip-counts) | The template declares the outbound IP counts | current |
 | [11](#11-alerts-go-to-slack-and-info-level-is-dropped) | Alerts go to Slack, and info-level is dropped | current |
+| [12](#12-gitops-is-argocd-not-flux) | GitOps is ArgoCD, not Flux | settled |
+| [13](#13-the-default-appproject-is-emptied) | The `default` AppProject is emptied | current |
 
 ---
 
@@ -433,3 +435,87 @@ match, giving a rule that looks healthy and never fires.
 **ArgoCD was not being scraped at all** — it ships metrics Services and no
 ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
 rule has a target before trusting it (install.md §11).
+## 12. GitOps is ArgoCD, not Flux
+
+**Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
+running cluster. Flux is a good tool; it is not the right one for *this* design.
+**Why.** The multi-tenancy model is the whole argument. An `AppProject` expresses,
+in one file a reviewer reads top to bottom, that a project may deploy **only these
+kinds**, **only into its own namespaces**, **only from its own repo** — and names
+the escalation paths it excludes. That file is labelled the security boundary
+because it is: projects run their own GitOps repos that nobody on the infra side
+reviews, so the whitelist is the only thing between a commit in their repo and the
+cluster.
+
+Flux isolates differently: a `Kustomization` impersonates a ServiceAccount and
+RBAC does the rest. Reaching the same result means per-project ServiceAccounts and
+Roles enumerating allowed verbs and kinds, and depending on
+`spec.serviceAccountName` being set correctly on every `Kustomization`. Two
+consequences:
+
+- **Kind allowlisting through RBAC is scattered and easier to get subtly wrong.**
+  "No `ExternalSecret`, no `SealedSecret`, no `RoleBinding`" stops being one
+  reviewable list.
+- **The source-repo restriction largely disappears.** RBAC constrains *what* is
+  applied, not *where it came from*. The `sourceRepos` pin has no Flux
+  counterpart; you would rely on only infra committing the `GitRepository`.
+
+That second point is the sharper one, and worth conceding openly if challenged:
+this design deliberately keeps repo-origin and applied-kinds as two independent
+controls, and Flux collapses them into one.
+
+The same reasoning covers `project-infra`, the privileged lane, whose own comment
+warns that its RoleBinding + `namespace: '*'` combination is the escalation path
+in this cluster. Under Flux both lanes are `Kustomization` objects separated only
+by which ServiceAccount they impersonate — a less legible separation for exactly
+the object that can mint RoleBindings anywhere.
+
+**Where Flux would have been fine or better**, stated because conceding it
+strengthens the rest:
+
+- **ApplicationSet is genuinely awkward.** `gitops-appset.yaml` needs a matrix
+  generator, `elementsYaml` and a `templatePatch` purely because
+  `syncPolicy.automated` is presence-based and cannot be conditionally templated.
+  Flux's per-project `Kustomization` files would be plainer, at the cost of one
+  file per project-environment instead of one generator.
+- **Helm handling.** Flux's `HelmRelease` performs a real `helm install/upgrade`;
+  ArgoCD renders and applies. The handover story in
+  [argocd.md](argocd.md) — capture hand edits with `helm get values` — would be
+  slightly more natural under Flux.
+
+**One argument that has since reversed.** The 2026-08-12 assessment noted that
+running ArgoCD with no GUI forfeits its main advantage. That changed when project
+teams asked to see their own sync status: ArgoCD has a first-party UI that
+integrates with the existing Dex, and Flux has none (Weave GitOps is third-party
+and lost its corporate backing). What was a point against ArgoCD is now a point
+for it.
+
+**Migration cost, if it is ever asked.** `Application` and `ApplicationSet`
+objects would be mechanical to convert. The `AppProject`s would need a from-scratch
+RBAC redesign. Stating that plainly is better than claiming there is no lock-in.
+
+## 13. The `default` AppProject is emptied
+
+**Current.** `k8s/argocd/projects/default.yaml` overrides ArgoCD's built-in
+`default` project with empty `sourceRepos`, `destinations`,
+`clusterResourceWhitelist` and `namespaceResourceWhitelist`.
+
+**Why.** ArgoCD creates `default` at startup permitting **any repo, any
+namespace, and every cluster-scoped kind**, and it *cannot be deleted* — upstream
+documents that it may be modified but not removed, and recommends emptying it in
+multi-tenant setups. Left alone it is a fully permissive project sitting beside
+the AppProject whitelist that entry 12 identifies as the entire security boundary.
+
+**It was not a live escalation when this was written**, and the entry records that
+so a future reader does not over-read it: no Application referenced `default` (23
+on `infra`, 2 on `project-infra`), and project developers cannot create
+Applications at all — verified by impersonation. The point is that "nobody uses
+it" is a weaker guarantee than "it cannot be used", and the cost of the stronger
+one is a nine-line file.
+
+**Consequence, by design.** Any Application that omits `spec.project`, or names
+`default` explicitly, now fails to sync instead of deploying with unrestricted
+permissions. That is the intended behaviour: project assignment becomes
+deliberate. An Application that suddenly cannot sync after this lands is telling
+you it never named a project.
+
