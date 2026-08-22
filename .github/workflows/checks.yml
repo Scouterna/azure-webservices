@@ -188,3 +188,98 @@ jobs:
               print('\n'.join(bad), file=sys.stderr)
               sys.exit(1)
           PY
+
+  decisions-pointers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Renumbering an entry silently breaks every pointer at it. Three of these
+      # shipped across two PRs before this job existed. See docs/decisions.md.
+      - name: decisions.md entry pointers resolve
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess, sys
+
+          DEC = pathlib.Path('docs/decisions.md')
+          text = DEC.read_text(encoding='utf-8', errors='replace')
+          entries = {int(m.group(1)): m.group(2)
+                     for m in re.finditer(r'^## (\d+)\.\s+(.*)$', text, re.M)}
+          if not entries:
+              print('no numbered entries found in docs/decisions.md — has the '
+                    'heading format changed?', file=sys.stderr)
+              sys.exit(1)
+
+          bad, checked = [], 0
+
+          # 1. Numbering must be a gap-free run from 1. A gap means an entry was
+          # removed or renumbered and something still points into the hole.
+          nums = sorted(entries)
+          if nums != list(range(1, len(nums) + 1)):
+              bad.append(f"entry numbers are not 1..N with no gaps: {nums}")
+
+          # 2. The index table must list every entry, and link to a real anchor.
+          def slug(h):
+              s = re.sub(r'[`*]', '', h.strip().lower())
+              s = re.sub(r'[^a-z0-9 -]', '', s)
+              return re.sub(r'\s+', '-', s).strip('-')
+          anchors = {slug(h) for h in entries.values()}
+          anchors |= {slug(m.group(1))
+                      for m in re.finditer(r'^#{2,4}\s+(.*)$', text, re.M)}
+          for n, target in re.findall(r'\|\s*\[(\d+)\]\(#([^)]+)\)', text):
+              checked += 1
+              if target not in anchors:
+                  bad.append(f"docs/decisions.md: index row [{n}] links to "
+                             f"#{target}, which is not a heading")
+          listed = {int(n) for n, _ in re.findall(r'\|\s*\[(\d+)\]\(#([^)]+)\)', text)}
+          for n in entries:
+              if n not in listed:
+                  bad.append(f"docs/decisions.md: entry {n} has no index row")
+
+          # 3. References INSIDE decisions.md are a bare "entry N". They must
+          # resolve, and must not point at the entry they sit in — a
+          # self-reference sends the reader back where they started.
+          current = None
+          for i, line in enumerate(text.splitlines(), 1):
+              h = re.match(r'^## (\d+)\.', line)
+              if h:
+                  current = int(h.group(1))
+                  continue
+              for m in re.finditer(r'\bentry (\d+)\b', line):
+                  n = int(m.group(1))
+                  checked += 1
+                  if n not in entries:
+                      bad.append(f"docs/decisions.md:{i}: entry {n} does not exist")
+                  elif n == current:
+                      bad.append(f"docs/decisions.md:{i}: entry {n} refers to "
+                                 f"itself — did a renumber miss this?")
+
+          # 4. References from EVERY OTHER tracked file name the document first.
+          tracked = subprocess.run(['git', 'ls-files'], capture_output=True,
+                                   text=True, check=True).stdout.split()
+          ref = re.compile(r'decisions\.md\D{0,30}?entry (\d+)|decisions\.md (\d+)\b')
+          for f in tracked:
+              if f == 'docs/decisions.md':
+                  continue
+              fp = pathlib.Path(f)
+              if not fp.is_file():
+                  continue
+              try:
+                  body = fp.read_text(encoding='utf-8', errors='replace')
+              except (OSError, UnicodeDecodeError):
+                  continue
+              for i, line in enumerate(body.splitlines(), 1):
+                  m = ref.search(line)
+                  if not m:
+                      continue
+                  n = int(m.group(1) or m.group(2))
+                  checked += 1
+                  if n not in entries:
+                      bad.append(f"{f}:{i}: points at decisions.md entry {n}, "
+                                 f"which does not exist (entries: 1..{max(entries)})")
+
+          print(f"{len(entries)} entries, {checked} pointers checked")
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY
+
