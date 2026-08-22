@@ -1,0 +1,20 @@
+# ArgoCD ships metrics Services but no ServiceMonitor, so argocd_app_info was not
+# collected — the ArgoCDAppNotSynced rule would never have fired. Lives here rather
+# than with ArgoCD itself because ArgoCD is installed from the upstream manifest.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-metrics
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  namespaceSelector:
+    matchNames:
+      - argocd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-metrics
+  endpoints:
+    - port: metrics
+      interval: 30s

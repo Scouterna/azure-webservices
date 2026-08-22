@@ -20,6 +20,7 @@ say why rather than deleting it.
 | [8](#8-a-namespace-is-a-security-boundary-the-appproject-is-not-the-only-one) | A namespace is a security boundary; the AppProject bounds only GitOps | current |
 | [9](#9-audit-logging-is-kube-audit-admin-only-capped-and-off-cluster) | Audit logging is `kube-audit-admin` only, capped, and off-cluster | current |
 | [10](#10-the-template-declares-the-outbound-ip-counts) | The template declares the outbound IP counts | current |
+| [11](#11-alerts-go-to-slack-and-info-level-is-dropped) | Alerts go to Slack, and info-level is dropped | current |
 
 ---
 
@@ -270,8 +271,9 @@ audited**: no diagnostic setting exists on the vault, so there is no record of w
 secrets were read from the cluster's root of trust. Given that this category cannot
 record Kubernetes reads either, that is the notable remaining gap — it is the half
 of the original finding this change does not close, and it stays listed in
-[maintenance.md](maintenance.md). **Alerting is Azure-side, not Alertmanager.** In-cluster alerting is still missing
-(see [maintenance.md](maintenance.md)), but this workspace never depended on it:
+[maintenance.md](maintenance.md). **Alerting for this workspace is Azure-side.**
+In-cluster alerting now exists (entry 11), but this workspace never depended on it
+and still should not — these rules must fire when the cluster is the problem:
 `infra/alerts.bicep` carries an action group with an email receiver and two rules,
 deployed outside the cluster so they still fire when the cluster is the problem.
 
@@ -384,3 +386,50 @@ incremental deploy — verified by the same what-if run, which reported no chang
 them once `countIPv6` was declared. If a future what-if shows one of them as a
 `Modify`, treat it the way this one was treated.
 
+## 11. Alerts go to Slack, and info-level is dropped
+
+**Current.** Alertmanager posts to `#webservices-alerts` via a Slack webhook. The
+webhook URL comes from Key Vault through an `ExternalSecret` and is read with
+`slack_api_url_file`, so it never appears in the values file or in the rendered
+config Secret.
+
+**Why there was nothing before.** The chart's default config routes every alert to
+a receiver named `"null"`. With 155 chart-shipped rules plus the governance ones,
+roughly 158 alert rules were firing into it — the platform looked instrumented and
+delivered nothing.
+
+**`info` is dropped, deliberately.** On a single-node cluster the info-level rules
+are mostly steady-state noise, and the fastest way to make a new alerting channel
+useless is to fill it on day one. `critical` gets its own route with a 1h repeat;
+`warning` groups on the 12h default. `Watchdog` goes to `"null"` — it fires
+constantly by design and only matters if you are checking that the pipeline itself
+works. Raising `info` back up is a one-line change once the channel is quiet.
+
+**Setting `config` replaces the chart default wholesale**, so the four inhibit
+rules are carried over by hand rather than inherited. They are what stops one
+critical alert dragging its warning and info siblings along. Dropping them would
+not error — it would just get noisy.
+
+## What the rules actually watch
+
+A receiver alone would have delivered 155 generic Kubernetes alerts and still
+nothing about this platform's own controls, all of which fail quietly:
+`governance/platform-health.yaml` adds five rules for exactly those.
+
+| Alert | The quiet failure it catches |
+|---|---|
+| `ExternalSecretNotReady` | The Secret keeps serving its last synced value, so the workload runs fine until a rotation or rebuild |
+| `VeleroBackupFailing` | Backups erroring; only matters when a restore is needed |
+| `VeleroNoRecentBackup` | Worse — not failing, just not running |
+| `PostgresWALArchivingFailing` | The database serves queries perfectly while archiving nothing |
+| `ArgoCDAppNotSynced` | GitOps stopped converging, so every control in this repo quietly stops being enforced |
+
+**Metric names were cross-checked against the committed dashboards**, not written
+from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, not
+`cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
+match, giving a rule that looks healthy and never fires.
+
+`argocd_app_info` is the exception with no corroboration in the repo, because
+**ArgoCD was not being scraped at all** — it ships metrics Services and no
+ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
+rule has a target before trusting it (install.md §11).

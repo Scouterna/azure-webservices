@@ -143,7 +143,60 @@ prometheus:
               storage: 32Gi
 
 alertmanager:
+  # Setting `config` REPLACES the chart's default wholesale, so the inhibit rules
+  # and the Watchdog sink below are carried over deliberately. docs/decisions.md 11.
+  config:
+    global:
+      resolve_timeout: 5m
+      # Read from the mounted Secret, so the URL never enters this file or the
+      # rendered config Secret.
+      slack_api_url_file: /etc/alertmanager/secrets/alertmanager-slack/webhook-url
+    inhibit_rules:
+      # Chart defaults: a louder alert silences the quieter ones for the same object.
+      - source_matchers: [severity = critical]
+        target_matchers: [severity =~ warning|info]
+        equal: [namespace, alertname]
+      - source_matchers: [severity = warning]
+        target_matchers: [severity = info]
+        equal: [namespace, alertname]
+      - source_matchers: [alertname = InfoInhibitor]
+        target_matchers: [severity = info]
+        equal: [namespace]
+      - target_matchers: [alertname = InfoInhibitor]
+    route:
+      group_by: [namespace, alertname]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: slack
+      routes:
+        # Watchdog fires constantly by design — it proves the pipeline works and is
+        # useless as a notification.
+        - matchers: ['alertname = "Watchdog"']
+          receiver: "null"
+        # 155 of the ~158 rules are the chart's; info-level is noise on a
+        # single-node cluster and would drown the rest on day one.
+        - matchers: ['severity = "info"']
+          receiver: "null"
+        - matchers: ['severity = "critical"']
+          receiver: slack
+          repeat_interval: 1h
+    receivers:
+      - name: "null"
+      - name: slack
+        slack_configs:
+          - channel: '#webservices-alerts'
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}'
+            text: >-
+              {{ range .Alerts }}*{{ .Labels.severity }}* {{ .Annotations.summary }}
+              {{ if .Annotations.description }}{{ .Annotations.description }}
+              {{ end }}{{ end }}
   alertmanagerSpec:
+    # Mounts at /etc/alertmanager/secrets/alertmanager-slack/ — the ExternalSecret
+    # in external-secrets/alertmanager-secrets.yaml creates it.
+    secrets:
+      - alertmanager-slack
     storage:
       volumeClaimTemplate:
         spec:

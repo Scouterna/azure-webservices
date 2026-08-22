@@ -43,6 +43,7 @@ KEY_VAULT_NAME=kv-scouterna-webservices       # Key Vault name (globally unique,
 BACKUP_STORAGE_ACCOUNT=stwsv2backup              # backup storage account (globally unique, 3-24 lowercase alnum)
 LOG_WORKSPACE=log-webservices     # audit workspace (must match auditWorkspaceName in the bicepparam)
 ALERT_EMAIL=info@scouterna.se     # receives audit-pipeline alerts (a shared mailbox, not a person)
+SLACK_ALERT_CHANNEL='#webservices-alerts'   # must match the channel in kube-prometheus-stack-values.yaml
 
 # --- Identities (in $INFRA_RG; persist across rebuilds) ---
 ESO_IDENTITY=id-eso-webservices       # managed identity ESO authenticates as
@@ -389,6 +390,11 @@ az keyvault secret set --vault-name $KEY_VAULT_NAME --name grafana-github-client
 # Dex SSO (§2b) — without these, Headlamp and kubectl SSO do not work
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name dex-github-client-secret   --value "$DEX_GITHUB_CLIENT_SECRET"
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name dex-headlamp-client-secret --value "$DEX_HEADLAMP_CLIENT_SECRET"
+
+# Slack incoming webhook for Alertmanager. Create it in Slack first (an app with
+# an Incoming Webhook scoped to $SLACK_ALERT_CHANNEL); the URL is a bearer
+# credential — anyone holding it can post to the channel.
+az keyvault secret set --vault-name $KEY_VAULT_NAME --name alertmanager-slack-webhook-url   --value "$SLACK_WEBHOOK_URL"
 ```
 
 **Sealed Secrets sealing key (do this once; it must survive every rebuild).** The
@@ -1077,6 +1083,51 @@ credentials and its RBAC must match the vault's — record the answer in
 [decisions.md](decisions.md) entry 9 either way, and see the mitigation there.
 An empty result means only that no Secret has been written since the diagnostic
 setting was created; re-run it after §10 has materialised the infra secrets.
+
+### Alerts actually reach Slack
+
+Alertmanager reports healthy whether or not delivery works, and a wrong webhook
+fails silently at post time. Prove it end to end rather than inferring it:
+
+```bash
+# 1. the webhook secret arrived and is mounted
+kubectl -n monitoring get externalsecret alertmanager-slack   # READY True
+kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- ls /etc/alertmanager/secrets/alertmanager-slack/          # expect: webhook-url
+
+# 2. Alertmanager loaded the config and resolved the receivers
+kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- localhost:9093/api/v2/status | grep -o '"name":"slack"'
+
+# 3. delivery works — fire a synthetic alert and watch for it in Slack
+kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- --post-data='[{"labels":{"alertname":"SlackPipelineTest","severity":"critical"}}]'      --header='Content-Type: application/json' localhost:9093/api/v2/alerts
+```
+
+**The pass criterion is a message appearing in `$SLACK_ALERT_CHANNEL`** — not the
+absence of an error from the commands above. A 4xx from Slack is logged and
+discarded, so check the container log if nothing arrives:
+
+```bash
+kubectl -n monitoring logs sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager | grep -i slack
+```
+
+The test alert self-resolves once you stop posting it (`send_resolved: true` means
+you get a resolved message too, which also confirms the return path).
+
+### The platform-health rules have targets
+
+Four of the five rules query metrics the committed dashboards already use, so they
+are known-good. `ArgoCDAppNotSynced` is the exception — ArgoCD ships metrics
+Services but no ServiceMonitor, so this install adds one. A rule with no target
+never fires and looks identical to a healthy cluster:
+
+```bash
+# expect argocd-metrics UP, and a non-empty result for the metric the rule uses
+kubectl -n monitoring get servicemonitor argocd-metrics
+kubectl -n monitoring exec sts/prometheus-kps-kube-prometheus-stack-prometheus -c prometheus   -- wget -qO- 'localhost:9090/api/v1/query?query=argocd_app_info' | head -c 300
+```
+
+An empty `result` array means the scrape is not working — check the ServiceMonitor
+selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
+manifest owns and can change on an ArgoCD upgrade.
 
 ### Dual-stack DNS
 
