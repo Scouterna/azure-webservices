@@ -504,7 +504,7 @@ RBAC redesign. Stating that plainly is better than claiming there is no lock-in.
 namespace, and every cluster-scoped kind**, and it *cannot be deleted* — upstream
 documents that it may be modified but not removed, and recommends emptying it in
 multi-tenant setups. Left alone it is a fully permissive project sitting beside
-the AppProject whitelist that entry 13 identifies as the entire security boundary.
+the AppProject whitelist that entry 12 identifies as the entire security boundary.
 
 **It was not a live escalation when this was written**, and the entry records that
 so a future reader does not over-read it: no Application referenced `default` (23
