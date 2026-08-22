@@ -4,6 +4,7 @@
 |-----|----------------|
 | [install.md](install.md) | The full build runbook, from empty subscription to running cluster — one continuous session, dependency-ordered (prerequisites → provision → cluster-derived wiring → ArgoCD). Non-obvious pitfalls called out inline. |
 | [onboarding.md](onboarding.md) | How a project gets namespace(s) and developer access, and the two routes for its own workload: by hand, or from the project's own GitOps repo. |
+| [gitops.md](gitops.md) | How a commit becomes a change in the cluster: the app-of-apps root, the 22 common-service Applications and their sync-wave order, the two project ApplicationSets, and where to look when something does not appear. |
 | [argocd.md](argocd.md) | Lathund for driving ArgoCD with `kubectl` — no CLI, no GUI: read state, refresh, sync, and what each symptom means. |
 | [maintenance.md](maintenance.md) | Version pins, upgrade cadences, and how to keep the platform current. |
 | [postgres.md](postgres.md) | The shared PostgreSQL design: why one server, what isolation it gives, and when a project should get its own instance. |
