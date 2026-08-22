@@ -43,7 +43,7 @@ ArgoCD**, so the whole platform can be torn down and rebuilt from this repo.
    |  namespaces  |                 |    services     |  group, managed by
    +--------------+                 +-----------------+  ArgoCD
 
-   common services:  Traefik . cert-manager . MinIO (object storage) .
+   common services:  Traefik . cert-manager . MinIO (observability store) .
    kube-prometheus-stack (Prometheus/Grafana/Alertmanager) . Loki (logs) .
    Thanos (long-term metrics) . External Secrets Operator (Key Vault) .
    CloudNativePG (PostgreSQL) . Headlamp (web UI)
@@ -61,9 +61,15 @@ no default-deny baseline yet — is in [docs/security.md](docs/security.md), wit
 reasoning behind each choice in [docs/decisions.md](docs/decisions.md).
 
 Storage is in-cluster and portable: **MinIO** for S3-compatible object storage
-(backs Loki, Thanos, and backups) and **CloudNativePG** for PostgreSQL — no Azure
-data PaaS. Persistent volumes use a cheap StandardSSD StorageClass by default,
-with a Premium class available opt-in.
+and **CloudNativePG** for PostgreSQL — no Azure data PaaS. MinIO exists to back
+**Loki and Thanos** and is deliberately **not** general-purpose storage for
+projects: it is a single replica on one volume, holding only data those two can
+rebuild, which is why it is backed up weekly rather than daily. A project needing
+persistent state uses the shared PostgreSQL or a PersistentVolumeClaim — see
+[onboarding.md](docs/onboarding.md).
+
+Persistent volumes use a cheap StandardSSD StorageClass by default, with a
+Premium class available opt-in.
 
 ### Common services
 
@@ -72,7 +78,7 @@ with a Premium class available opt-in.
 | **cluster-infra** | StorageClasses, cert-manager ClusterIssuers, cluster-wide NetworkPolicy | raw manifests |
 | **cert-manager** | TLS certificates (Let's Encrypt) | `cert-manager` v1.21.0 |
 | **Traefik** | Ingress controller (default class) + LoadBalancer | `traefik` 41.0.2 |
-| **MinIO** | S3-compatible object storage | `minio` 5.4.0 |
+| **MinIO** | S3-compatible object storage, backing Loki + Thanos (not for projects) | `minio` 5.4.0 |
 | **CloudNativePG** | PostgreSQL operator + the shared PostgreSQL server | `cloudnative-pg` 0.29.0 |
 | **External Secrets** | Sync secrets from Azure Key Vault (Workload Identity) | `external-secrets` 2.8.0 |
 | **Sealed Secrets** | Commit-safe secrets projects can self-serve | `sealed-secrets` 2.19.1 |
