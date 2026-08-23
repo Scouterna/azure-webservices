@@ -1,0 +1,46 @@
+# Lets this project READ the sync status of its OWN ArgoCD Application(s).
+# Copy to argocd-status-rbac.yaml (drop the .example) to activate it.
+#
+# Application objects live in the `argocd` namespace, which projects otherwise
+# have no access to, so without this a project cannot tell whether ArgoCD is
+# failing to sync its manifests — a stalled sync looks exactly like "nothing has
+# happened yet". Read-only: no sync button, no diff view. For those, see
+# docs/argocd.md.
+#
+# ⚠️ Applications must be listed by name in resourceNames, and the names differ
+# per route (see docs/onboarding.md section D):
+#   project-infra-PROJECT  — always exists (namespace, RBAC, database)
+#   PROJECT-dev / -prod    — only if this project runs its OWN GitOps repo
+# An Application not named here stays invisible. Adding one later means editing
+# this file, so keep it in step with gitops.yaml.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: PROJECT-argocd-status
+  namespace: argocd
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "watch"]
+    resourceNames:
+      - project-infra-PROJECT
+      # Uncomment the pair below if this project has a gitops.yaml.
+      # - PROJECT-dev
+      # - PROJECT-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: PROJECT-argocd-status
+  namespace: argocd
+subjects:
+  # Same subject as developer-rbac.yaml — the GitHub team display name,
+  # verbatim, and it fails silently if wrong.
+  - kind: Group
+    name: "aks:jwt:Scouterna:TEAM"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: PROJECT-argocd-status
+  apiGroup: rbac.authorization.k8s.io

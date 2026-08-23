@@ -61,7 +61,7 @@ is excluded.
    grep -rlZ PROJECT "k8s/projects/$PROJECT/" | xargs -0 sed -i "s/PROJECT/$PROJECT/g"
    ```
 
-   **Check it before moving on** — the file list should be 6 files, all under
+   **Check it before moving on** — the file list should be 7 files, all under
    `k8s/projects/$PROJECT/`, and no `PROJECT` may remain:
 
    ```bash
@@ -434,6 +434,49 @@ which does not match this table exactly:
 
 If you find yourself able to do something on this list, treat it as a gap to
 report rather than a shortcut.
+
+## D. See your own ArgoCD sync status (optional)
+
+Your namespaces show you what **is** running. They do not show you whether ArgoCD
+is *failing to apply* something — and a stalled sync looks exactly like "my change
+has not arrived yet". This section closes that gap.
+
+It is opt-in and needs the infra team once. Ask them to copy
+`k8s/projects/_template/infra/argocd-status-rbac.yaml.example` into your project's
+`infra/` directory as `argocd-status-rbac.yaml`, with your project name, your
+GitHub team, and the Applications you should see. After it syncs:
+
+```bash
+kubectl get app -n argocd project-infra-<project> \
+  -o custom-columns='SYNC:.status.sync.status,HEALTH:.status.health.status'
+```
+
+`SYNC: Synced` means the cluster matches Git. `OutOfSync` means it does not —
+either a sync is in flight, or one failed. For the reason:
+
+```bash
+kubectl get app -n argocd project-infra-<project> \
+  -o jsonpath='{.status.operationState.phase}{" "}{.status.operationState.message}{"\n"}'
+```
+
+**Which Applications exist depends on your route** (section C):
+
+| Application | When |
+|---|---|
+| `project-infra-<project>` | always — your namespaces, developer access, database |
+| `<project>-dev`, `<project>-prod` | only if you run your own GitOps repo (C2) |
+
+Each one must be listed by name in the Role, so tell infra which you want.
+
+**Two things this does not do**, both deliberate ([decisions.md entry
+14](decisions.md#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui)):
+
+- **`kubectl get app -n argocd` without a name is Forbidden**, and the
+  Applications do not appear in Headlamp's list view. Kubernetes RBAC cannot
+  filter a list, so access is granted per named object; permitting the list would
+  expose every project's Application to every project. Name yours and it works.
+- **Read-only.** You can watch a sync; you cannot start or stop one. If you need
+  to force a sync, ask infra — [argocd.md](argocd.md) has the procedure.
 
 ## Secrets
 
