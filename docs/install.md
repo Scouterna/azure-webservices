@@ -1372,8 +1372,10 @@ smaller attack surface, matches the "everything in Git" model.
   kubectl get app -n argocd                                    # state of everything
   kubectl annotate app -n argocd <app> \
     argocd.argoproj.io/refresh=hard --overwrite                # re-read Git now
+  # sync — syncOptions must be carried over explicitly, see argocd.md
+  OPTS=$(kubectl get app -n argocd <app> -o jsonpath='{.spec.syncPolicy.syncOptions}')
   kubectl patch app -n argocd <app> --type merge \
-    -p '{"operation":{"initiatedBy":{"username":"'"$USER"'"},"sync":{}}}'   # sync
+    -p '{"operation":{"initiatedBy":{"username":"'"$USER"'"},"sync":{"syncOptions":'"${OPTS:-[]}"'}}}'
   ```
 - **Debug** a stuck sync via a temporary
   `kubectl -n argocd port-forward svc/argocd-server 8080:443`, logging in with the
@@ -1381,10 +1383,18 @@ smaller attack surface, matches the "everything in Git" model.
   -o jsonpath='{.data.password}' | base64 -d`). Not for daily use — the kubectl
   path above needs no shared credential.
 
-If a shared dashboard is ever wanted, expose `argocd-server` via Traefik + GitHub
-OAuth via ArgoCD's bundled Dex (Scouterna org, teams → RBAC). Not done here by
-choice. Note that until it is, `argocd-rbac-cm` is empty and the break-glass
-`admin` is unrestricted — one more reason it is not for daily use.
+**Projects see their own sync status without any of this** — a Role in `argocd`
+scoped to their own Applications, described in
+[onboarding.md](onboarding.md#d-see-your-own-argocd-sync-status-optional) and
+[decisions.md entry 14](decisions.md#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui).
+
+If a shared dashboard is ever wanted anyway, expose `argocd-server` via Traefik
+and point ArgoCD's `oidc.config` at the **standalone Dex this cluster already
+runs** (§2b) — not ArgoCD's bundled Dex, which would be a second identity
+provider for the same GitHub org. Note that until then, `argocd-rbac-cm` is empty
+and the break-glass `admin` is unrestricted: exposing the UI without first
+setting a default policy of `role:''` would be a real escalation, not a small
+one. One more reason it is not for daily use.
 
 > **A sync overwrites hand edits.** An app left on manual sync (no `automated:`)
 > lets a project change the release in the cluster and keeps that drift — but the

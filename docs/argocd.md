@@ -27,6 +27,10 @@ kubectl get app -n argocd                    # everything, one line each
 
 `app` is the short name for `applications.argoproj.io`. Add `-w` to watch.
 
+> **This page assumes infra-level access.** A project developer cannot list
+> Applications and must name their own — see
+> [onboarding.md §D](onboarding.md#d-see-your-own-argocd-sync-status-optional).
+
 **Only what needs attention** — the single most useful command:
 
 ```bash
@@ -199,6 +203,7 @@ ApplicationSet or an app-of-apps — the parent overwrites it. Edit the file in 
 | A common service | `k8s/argocd/infra-apps/<svc>.yaml` + its values under `k8s/infra-manifest/` | `infra-root` |
 | An AppProject | `k8s/argocd/projects/*.yaml` | `argocd-projects` (wave -1) |
 | A project's namespace / RBAC / DB | `k8s/projects/<project>/infra/` | `project-infra` ApplicationSet |
+| Letting a project read its own sync status | `k8s/projects/<project>/infra/argocd-status-rbac.yaml` | `project-infra` ApplicationSet |
 | A project's own AppProject (its repo + namespaces + what it may deploy) | `k8s/argocd/projects/<project>.yaml` | `argocd-projects` (wave -1) |
 | Registering a project's own GitOps repo | `k8s/projects/<project>/gitops.yaml` | `project-gitops` ApplicationSet |
 | A project's workload itself | **the project's own repo** — not this one | the generated `<project>-<env>` Application |

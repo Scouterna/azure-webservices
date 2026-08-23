@@ -23,6 +23,7 @@ say why rather than deleting it.
 | [11](#11-alerts-go-to-slack-and-info-level-is-dropped) | Alerts go to Slack, and info-level is dropped | current |
 | [12](#12-gitops-is-argocd-not-flux) | GitOps is ArgoCD, not Flux | settled |
 | [13](#13-the-default-appproject-is-emptied) | The `default` AppProject is emptied | current |
+| [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
 
 ---
 
@@ -519,3 +520,54 @@ permissions. That is the intended behaviour: project assignment becomes
 deliberate. An Application that suddenly cannot sync after this lands is telling
 you it never named a project.
 
+
+## 14. Projects read their own ArgoCD status via Kubernetes RBAC, not an ArgoCD UI
+
+**Current.** A project that wants to see whether ArgoCD is syncing its manifests
+gets a `Role` in the `argocd` namespace scoped with `resourceNames` to its own
+`Application` objects, bound to its GitHub team. There is no ArgoCD web UI, and
+`argocd-server` is not exposed. The template is
+`k8s/projects/_template/infra/argocd-status-rbac.yaml.example`; it is opt-in, and
+a project without it sees nothing in `argocd` at all.
+
+**Why this and not the UI.** Projects could already see the *effects* of a sync —
+Deployments, Pods and Events in their own namespaces, through Headlamp. What they
+could not see is a sync that is **failing**, which is the case that matters: a
+stalled sync looks exactly like "nothing has happened yet". Verified by
+impersonation before this landed: a project developer got `no` for `get`, `list`
+and `watch` on `applications.argoproj.io`.
+
+Exposing the ArgoCD UI behind Dex would also answer it, and `install.md` had
+always left that door open. It was not taken because it costs a new public
+endpoint, a second authorisation model (`argocd-rbac-cm`, currently empty, with
+an unrestricted break-glass `admin` account) and per-project RBAC lines that must
+be generated during onboarding or silently drift. The RBAC route reuses the
+identity and the tool projects already have.
+
+**The limitation, stated plainly: `kubectl get app -n argocd` is Forbidden.**
+Kubernetes RBAC cannot filter a collection, so `resourceNames` does not restrict
+`list` — it only permits `get` on named objects. A developer must therefore name
+the Application:
+
+```
+kubectl get app -n argocd project-infra-<project> \
+  -o custom-columns='SYNC:.status.sync.status,HEALTH:.status.health.status'
+```
+
+The alternative was granting unscoped `list`, which would expose every project's
+Application to every project. A label selector does not help — the filtering is
+client-side and the request is refused before it. The same applies in Headlamp,
+which lists resources: the Application will not appear in a list view.
+
+**Consequence.** `project-infra` gains `Role` in its
+`namespaceResourceWhitelist`, alongside the `RoleBinding` it already had. That
+widens the cluster's most privileged AppProject by one kind, which is why the
+Role is written per project with explicit `resourceNames` rather than as a shared
+ClusterRole: a Role grants no more than the verbs written in it, and only inside
+its own namespace. Verbs are `get` and `watch` only — not `patch`, not `delete`,
+so a project cannot trigger or abort its own sync. Confirmed by impersonation,
+including that another project's team is refused.
+
+**Revisit if** projects ask for the diff view or a self-service sync button.
+Those are real arguments for the UI, and the per-project `resourceNames` work
+done here is not wasted if it is built.

@@ -52,6 +52,11 @@ spec:
       kind: ServiceAccount
     - group: 'rbac.authorization.k8s.io'
       kind: RoleBinding
+    # Role is needed only for the per-project argocd-status Role, which must
+    # carry resourceNames and so cannot be a shared ClusterRole. A Role grants
+    # no more than the verbs written in it, and only within its own namespace.
+    - group: 'rbac.authorization.k8s.io'
+      kind: Role
     - group: 'postgresql.cnpg.io'
       kind: '*'
     - group: 'external-secrets.io'
