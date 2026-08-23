@@ -129,6 +129,10 @@ docs/                      build + onboarding runbooks (start here to build the 
 Onboarding a new common service is one file: drop an `Application` into
 `k8s/argocd/infra-apps/` and commit — the app-of-apps root picks it up.
 
+**How this actually runs** — what applies what, why the services are ordered the
+way they are, and how a project's own repo is wired in — is
+[docs/gitops.md](docs/gitops.md).
+
 ---
 
 ## Building the cluster
