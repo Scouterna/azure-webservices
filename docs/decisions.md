@@ -432,6 +432,40 @@ from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, 
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
 
+**A rule goes silent when its exporter does, and that is not obvious.** Every rule
+above needs its series to *exist*: `== 1`, `increase()` and `time() - metric` all
+return nothing when the metric is absent, so the alert cannot fire at the moment the
+component it watches disappears. `VeleroNoRecentBackup` was the clearest case —
+Velero uninstalled, crashed, or never having completed a backup all produced no
+series and therefore no alert.
+
+The chart's `TargetDown` is the generic net, but it is `warning`-severity, needs
+more than 10% of a job's targets down, and cannot fire at all if the ServiceMonitor
+itself is gone. So the two cases where *absence is itself the failure* get an
+explicit companion:
+
+- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`, so a fresh cluster
+  gets past its first 02:00 run before complaining that no backup has ever
+  succeeded.
+- **`ArgoCDMetricsAbsent`** — the more useful of the two, because it also catches
+  the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
+  labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
+
+Read these as "the rule above has gone blind", not as the underlying fault. They
+deliberately do not suppress their siblings: the chart's inhibit rules match on
+`alertname`, so a firing `VeleroBackupMetricsAbsent` still lets
+`VeleroBackupFailing` through if it can fire at all.
+
+**ESO and CNPG deliberately do not get one.** Their failures surface elsewhere — a
+workload breaks on the next rotation, and `TargetDown` covers the endpoint — so a
+companion each would add noise for little signal. The CNPG case is the weaker
+argument of the two: archiving could fail while the exporter is also down. The
+better fix there is a staleness rule on
+`cnpg_pg_stat_archiver_seconds_since_last_archival` (a metric the dashboards
+already use), which detects the actual bad state rather than the monitoring gap —
+but it needs to know whether `archive_timeout` is set, or an idle database will
+false-alarm. Left open rather than guessed.
+
 `argocd_app_info` is the exception with no corroboration in the repo, because
 **ArgoCD was not being scraped at all** — it ships metrics Services and no
 ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that

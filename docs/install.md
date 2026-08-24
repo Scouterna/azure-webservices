@@ -1129,6 +1129,19 @@ An empty `result` array means the scrape is not working — check the ServiceMon
 selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
 manifest owns and can change on an ArgoCD upgrade.
 
+Two of the seven rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
+`VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
+a broken scrape reports itself instead of looking like a healthy cluster. On a fresh
+install expect `VeleroBackupMetricsAbsent` to be **pending** until the first 02:00
+backup completes — that is the 48h window doing its job, not a fault.
+
+```bash
+kubectl -n monitoring exec sts/prometheus-kps-kube-prometheus-stack-prometheus -c prometheus   -- wget -qO- 'localhost:9090/api/v1/rules' | grep -o '"name":"[A-Za-z]*Absent"'
+```
+
+Expect both names. If a rule is missing entirely, the PrometheusRule was not picked
+up — check it carries `release: kps`.
+
 ### Dual-stack DNS
 
 The cluster is dual-stack, so the Traefik LoadBalancer has **both** an IPv4 and an
