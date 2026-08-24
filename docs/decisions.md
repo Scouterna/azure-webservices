@@ -444,9 +444,13 @@ more than 10% of a job's targets down, and cannot fire at all if the ServiceMoni
 itself is gone. So the two cases where *absence is itself the failure* get an
 explicit companion:
 
-- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`, so a fresh cluster
-  gets past its first 02:00 run before complaining that no backup has ever
-  succeeded.
+- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`. It fires on a
+  fresh cluster until the first 02:00 run, which is correct rather than a false
+  positive: no backup has succeeded, so backup alerting really is blind. The
+  window covers a series that existed and vanished; a series that has **never**
+  existed is reported from the first evaluation, so only `for:` delays anything.
+  Sizing `for:` to cover install-to-first-backup would be ~26h, which would also
+  delay a real Velero outage by 26h — not worth it.
 - **`ArgoCDMetricsAbsent`** — the more useful of the two, because it also catches
   the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
   labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
