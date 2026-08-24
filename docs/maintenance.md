@@ -75,13 +75,51 @@ Thanos, Headlamp.
 
 ## AKS upgrades
 
-- **Patches** (`1.36.x`): automatic via the `patch` upgrade channel + NodeImage
-  channel in `infra/aks.bicep`. Nothing to do.
+- **Patches** (`1.36.x`): automatic via the `patch` upgrade channel in
+  `infra/aks.bicep`. Nothing to do.
+- **Node images**: **manual, deliberately** — `nodeOSUpgradeChannel: 'None'`.
+  Run one when convenient, with someone watching:
+  ```bash
+  az aks nodepool upgrade -g $RG --cluster-name $CLUSTER --name system --node-image-only
+  ```
+  Check for a pending image first with
+  `az aks nodepool get-upgrades -g $RG --cluster-name $CLUSTER -n system`.
+  Node images ship roughly weekly and carry OS CVE fixes, so **do not let this
+  drift for months** — the point is to choose the moment, not to skip it.
 - **Minors** (`1.36 → 1.37`): manual. Bump `kubernetesVersion` in
   `infra/aks.bicep` + the param files, `az deployment group create` (or
   `az aks upgrade`). Do it before AKS drops support for the running minor
   (check `az aks get-versions -l <region>`). On a single-node cluster the
   upgrade is briefly disruptive — expect a short control-plane/node blip.
+
+**Why node images are not on a channel.** On 2026-08-24 an automatic node-image
+upgrade on the test cluster surged a second node, moved every pod onto it, and
+then failed to drain the old one — leaving the pool in `provisioningState:
+Failed` with two nodes billing instead of one. It also took **SSO down**: Dex and
+the `konnectivity-agent` pods relocated in the same 90-second window, so the API
+server could not reach the token issuer and every login 401'd while the
+`JWTAuthenticator` still reported `Succeeded`. The fix was
+`az aks jwtauthenticator update` to force reconciliation.
+
+Two things made that expensive. It happened **unannounced** — AKS-internal
+upgrades raise no activity-log event, so Azure's audit trail shows nothing — and
+it happened **while nobody was watching**, so it surfaced as a mystery login
+failure rather than an expected blip. Running the upgrade by hand does not make
+it less disruptive; it makes the disruption something you are present for.
+
+**The drain blocked on a PodDisruptionBudget that can never be satisfied.** CNPG
+runs the shared Postgres at `instances: 1`, and its `shared-primary` PDB sets
+`minAvailable: 1` — so `disruptionsAllowed` is `0` permanently and no eviction is
+ever allowed. Any node drain wedges on it, manual or automatic. Check before
+upgrading:
+
+```bash
+kubectl get pdb -A -o custom-columns=\
+'NS:.metadata.namespace,NAME:.metadata.name,ALLOWED:.status.disruptionsAllowed'
+```
+
+Anything showing `ALLOWED: 0` will block a drain. Either scale it to two
+instances first, or expect to move that workload by hand.
 
 **A minor upgrade leaves Pod Security behind.** Project namespaces pin
 `pod-security.kubernetes.io/enforce-version` (see

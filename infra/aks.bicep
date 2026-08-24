@@ -92,10 +92,10 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
       }
     }
 
-    // Keep the cluster patched automatically.
+    // Patches automatic; node images deliberate. docs/maintenance.md.
     autoUpgradeProfile: {
       upgradeChannel: 'patch'
-      nodeOSUpgradeChannel: 'NodeImage'
+      nodeOSUpgradeChannel: 'None'
     }
 
     // Network: Azure CNI overlay + Cilium dataplane & policy, dual-stack.
