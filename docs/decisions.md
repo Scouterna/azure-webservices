@@ -663,11 +663,28 @@ requirement grows.
 survivable because the pool is pinned to one zone; a replacement node in another
 zone strands every disk-bound workload permanently, and no PDB setting helps.
 
-**The residual cost, accepted: every upgrade logs everyone out.** Dex runs
-`storage: type: memory`, so a restart generates a new signing key and invalidates
-every issued token. A stale token then returns a flat `401` that is
-indistinguishable from a broken authenticator — this has produced two wrong
-diagnoses. Compare the token's `kid` against Dex's live JWKS before suspecting
-anything else ([maintenance.md](maintenance.md)). Giving Dex persistent storage
-(`type: kubernetes`) would remove the whole class and is the obvious next
-improvement.
+**Dex keeps its signing keys, so an upgrade no longer logs everyone out.** With
+the previous `storage: type: memory`, every Dex restart generated a new signing
+key and **invalidated every issued token** — and the resulting `401` was
+indistinguishable from a broken authenticator, which produced two wrong
+diagnoses. `storage: type: kubernetes` persists the keys as custom resources in
+etcd. Verified on the test cluster: the JWKS `kid` was identical across a full
+`rollout restart`.
+
+It costs **no PVC and no attached disk** — the store is etcd, reached through the
+API server. The chart already shipped the ServiceAccount, the ClusterRole
+(`create` on `customresourcedefinitions`) and the namespace Role
+(`dex.coreos.com/*`); those permissions were simply unused. Dex creates its own
+ten CRDs at startup.
+
+**What it puts in etcd.** Refresh tokens become `refreshtokens.dex.coreos.com`
+objects in the `dex` namespace — real credentials in cluster state. Only the Dex
+ServiceAccount can read them; a project developer gets `no` (verified by
+impersonation), since project `admin` does not reach the `dex` namespace. It also
+makes a second Dex replica possible for the first time, because both would share
+auth-code state — not done here, but no longer blocked.
+
+**When a `401` still happens**, compare the token's `kid` against Dex's live JWKS
+before suspecting anything else ([maintenance.md](maintenance.md)). Keys now
+survive restarts, but a token older than a key *rotation* still fails, and that
+check distinguishes it from a real fault in seconds.

@@ -122,20 +122,22 @@ Two things make it survivable, both now in place:
   `Eviction blocked by Too Many Requests (usually a pdb): shared-1`, seen 67
   times over 7 minutes. Removing the PDB unblocked it immediately.
 
-**What an upgrade still costs: everyone is logged out.** Dex runs
-`storage: type: memory`, so restarting it generates a new signing key and
-**invalidates every issued token**. After a node replacement all users must log
-in again — and a stale token returns a flat `401` that looks exactly like a
-broken authenticator. Before diagnosing anything, compare the token's `kid`
-against Dex's live JWKS:
+- **Dex keeps its signing keys across restarts** (`storage: type: kubernetes`).
+  Previously an upgrade restarted Dex, rotated its key and logged **everyone**
+  out; the resulting `401` looked exactly like a broken authenticator and caused
+  two wrong diagnoses. Keys now persist as custom resources in etcd — no PVC.
+
+**If SSO fails, check the token's key id first.** It takes seconds and rules out
+the most common cause:
 
 ```bash
 curl -s https://dex.$HOST/keys | grep -o '"kid":"[^"]*"'
 ```
 
-A mismatch means the token predates the last Dex restart. Log in again; nothing
-is wrong. Giving Dex persistent storage (`type: kubernetes`) would remove this
-whole class of confusion and is the obvious next improvement.
+Compare with the `kid` in the token's JWT header. A mismatch means the token
+predates a key rotation — log in again, nothing is wrong. Only if they **match**
+and the API server still returns `401` is there a real fault to chase
+([decisions.md](decisions.md) entry 16).
 
 **Verifying after an upgrade.** Node images are checked with:
 

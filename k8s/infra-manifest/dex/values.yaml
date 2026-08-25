@@ -18,8 +18,12 @@ replicaCount: 1
 config:
   issuer: https://dex.wsinfra.scouterna.net
 
+  # Signing keys live here. With `memory` a restart rotates them and invalidates
+  # every issued token. docs/decisions.md entry 16.
   storage:
-    type: memory   # single-replica; connectors are stateless. Revisit for HA.
+    type: kubernetes
+    config:
+      inCluster: true
 
   # OAuth2 token lifetimes. id_tokens are short-lived but Headlamp silently
   # refreshes them using the refresh token (see the offline_access scope on the
