@@ -110,7 +110,7 @@ a manual step that gets forgotten is worse than an automatic one that
 occasionally disrupts. The fix is to make the disruption survivable, not to move
 it into a runbook nobody runs.
 
-Two things make it survivable, both now in place:
+Three things make it survivable, all now in place:
 
 - **One availability zone** ([decisions.md](decisions.md) entry 15) — so a
   replacement node can always reattach the cluster's disks. Without it the
@@ -144,6 +144,21 @@ and the API server still returns `401` is there a real fault to chase
 ```bash
 az aks nodepool get-upgrades -g $RG --cluster-name $CLUSTER -n <pool>
 ```
+
+**A minor upgrade leaves Pod Security behind.** Project namespaces pin
+`pod-security.kubernetes.io/enforce-version` (see
+`k8s/projects/_template/infra/namespace-*.yaml`), which is deliberate — the
+cluster's admission rules should not change underneath running workloads because
+the control plane moved. The cost is that the pin does not follow the upgrade:
+after moving to `1.37` the namespaces still enforce `1.36` semantics, silently,
+and any policy tightening in the new minor is not applied.
+
+So bump the pin as a **separate, later commit** — cluster first, verify, then the
+labels. The `warn`/`audit` labels are intentionally left unpinned, so between the
+two the warnings already show what the newer level would enforce. Every project
+namespace carries the pin; `.github/workflows/checks.yml` fails a project
+namespace committed without one, but it cannot tell a stale pin from a current
+one.
 
 ## Backup strategy (Velero)
 
