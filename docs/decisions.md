@@ -25,6 +25,7 @@ say why rather than deleting it.
 | [13](#13-the-default-appproject-is-emptied) | The `default` AppProject is emptied | current |
 | [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
 | [15](#15-the-node-pool-is-pinned-to-one-availability-zone) | The node pool is pinned to one availability zone | current |
+| [16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb) | Node-image upgrades stay automatic; the shared Postgres has no PDB | current |
 
 ---
 
@@ -620,3 +621,53 @@ matter if resources were ever split across subscriptions — matching zone numbe
 would not co-locate them. Re-read the live mapping with
 `az rest --method get --uri ".../locations?api-version=2022-12-01"` and look at
 `availabilityZoneMappings`.
+
+## 16. Node-image upgrades stay automatic, and the shared Postgres has no PDB
+
+**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, and
+`enablePDB: false` on the shared CloudNativePG cluster.
+
+**Why automatic, having been burned by it.** On 2026-08-24 an automatic
+node-image upgrade left the test cluster's pool in `provisioningState: Failed`,
+billing two nodes, and appeared to break SSO. Moving to a manual channel was
+implemented and then **rejected**: this platform is maintained by volunteers,
+node images ship roughly weekly carrying OS CVE fixes, and a manual step that is
+forgotten is worse than an automatic one that occasionally disrupts. **The right
+response was to make the disruption survivable, not to move it into a runbook
+nobody runs.**
+
+**Why the drain wedged, and why the PDB goes.** CNPG creates a
+`PodDisruptionBudget` selecting `cnpg.io/instanceRole: primary` — it protects
+whichever pod is currently primary, always exactly one. At `instances: 1` that
+makes `disruptionsAllowed` permanently `0`: **no eviction is ever allowed, and
+every node drain blocks forever.** AKS retries rather than forcing, emitting
+`Eviction blocked by Too Many Requests (usually a pdb): shared-1` — 67 times over
+7 minutes in a controlled reproduction. Setting `enablePDB: false` unblocked the
+stuck deletion immediately.
+
+Nothing real is given up. A PDB exists to stop Kubernetes evicting the primary
+while a replica catches up; with one instance there is no replica, so the
+guarantee was already vacuous — it blocked drains without protecting anything.
+Postgres still shuts down gracefully (`terminationGracePeriodSeconds: 1800`),
+which is what AKS waits for. Upstream CNPG documents `enablePDB: false` as
+advisable for non-production clusters.
+
+**`instances: 2` is the alternative fix, not a complement.** It also makes the
+PDB satisfiable, and adds real availability — at the cost of a second attached
+disk (one of ~6 remaining) and 1Gi more reserved memory. Measured on the test
+cluster: actual usage was ~8m CPU and 217Mi per instance, so the cost is the disk
+slot rather than compute. Revisit when the node count or the availability
+requirement grows.
+
+**This decision depends on [entry 15](#15-the-node-pool-is-pinned-to-one-availability-zone).** Automatic upgrades are only
+survivable because the pool is pinned to one zone; a replacement node in another
+zone strands every disk-bound workload permanently, and no PDB setting helps.
+
+**The residual cost, accepted: every upgrade logs everyone out.** Dex runs
+`storage: type: memory`, so a restart generates a new signing key and invalidates
+every issued token. A stale token then returns a flat `401` that is
+indistinguishable from a broken authenticator — this has produced two wrong
+diagnoses. Compare the token's `kid` against Dex's live JWKS before suspecting
+anything else ([maintenance.md](maintenance.md)). Giving Dex persistent storage
+(`type: kubernetes`) would remove the whole class and is the obvious next
+improvement.

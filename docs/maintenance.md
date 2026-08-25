@@ -75,17 +75,9 @@ Thanos, Headlamp.
 
 ## AKS upgrades
 
-- **Patches** (`1.36.x`): automatic via the `patch` upgrade channel in
-  `infra/aks.bicep`. Nothing to do.
-- **Node images**: **manual, deliberately** — `nodeOSUpgradeChannel: 'None'`.
-  Run one when convenient, with someone watching:
-  ```bash
-  az aks nodepool upgrade -g $RG --cluster-name $CLUSTER --name system --node-image-only
-  ```
-  Check for a pending image first with
-  `az aks nodepool get-upgrades -g $RG --cluster-name $CLUSTER -n system`.
-  Node images ship roughly weekly and carry OS CVE fixes, so **do not let this
-  drift for months** — the point is to choose the moment, not to skip it.
+- **Patches** (`1.36.x`) and **node images**: automatic, via the `patch` and
+  `NodeImage` channels in `infra/aks.bicep`. Nothing to do — deliberately, see
+  below.
 - **Minors** (`1.36 → 1.37`): manual. Bump `kubernetesVersion` in
   `infra/aks.bicep` + the param files, `az deployment group create` (or
   `az aks upgrade`). Do it before AKS drops support for the running minor
@@ -109,49 +101,47 @@ A pod whose disk is in a zone with no node stays `Pending` **permanently** with
 *"node(s) didn't match PersistentVolume's node affinity"* — it does not resolve
 on its own, and the fix is to add a node back in that zone.
 
-**Why node images are not on a channel.** On 2026-08-24 an automatic node-image
-upgrade on the test cluster surged a second node, moved every pod onto it, and
-then failed to drain the old one — leaving the pool in `provisioningState:
-Failed` with two nodes billing instead of one. It also took **SSO down**: Dex and
-the `konnectivity-agent` pods relocated in the same 90-second window, so the API
-server could not reach the token issuer and every login 401'd while the
-`JWTAuthenticator` still reported `Succeeded`. The fix was
-`az aks jwtauthenticator update` to force reconciliation.
+**Why node images stay on a channel.** An automatic node-image upgrade will
+replace the node, which is disruptive, and on 2026-08-24 it left the test
+cluster's pool in `provisioningState: Failed` with two nodes billing instead of
+one. Running upgrades by hand was considered and **rejected**: the platform is
+maintained by volunteers, node images ship roughly weekly with OS CVE fixes, and
+a manual step that gets forgotten is worse than an automatic one that
+occasionally disrupts. The fix is to make the disruption survivable, not to move
+it into a runbook nobody runs.
 
-Two things made that expensive. It happened **unannounced** — AKS-internal
-upgrades raise no activity-log event, so Azure's audit trail shows nothing — and
-it happened **while nobody was watching**, so it surfaced as a mystery login
-failure rather than an expected blip. Running the upgrade by hand does not make
-it less disruptive; it makes the disruption something you are present for.
+Two things make it survivable, both now in place:
 
-**The drain blocked on a PodDisruptionBudget that can never be satisfied.** CNPG
-runs the shared Postgres at `instances: 1`, and its `shared-primary` PDB sets
-`minAvailable: 1` — so `disruptionsAllowed` is `0` permanently and no eviction is
-ever allowed. Any node drain wedges on it, manual or automatic. Check before
-upgrading:
+- **One availability zone** ([decisions.md](decisions.md) entry 15) — so a
+  replacement node can always reattach the cluster's disks. Without it the
+  replacement landed in another zone and six workloads were stranded
+  permanently.
+- **`enablePDB: false` on the shared Postgres** — CNPG's PDB protects the
+  primary by role, so with `instances: 1` it is *never* satisfiable and blocks
+  every drain forever. AKS retries rather than forcing: the event is
+  `Eviction blocked by Too Many Requests (usually a pdb): shared-1`, seen 67
+  times over 7 minutes. Removing the PDB unblocked it immediately.
+
+**What an upgrade still costs: everyone is logged out.** Dex runs
+`storage: type: memory`, so restarting it generates a new signing key and
+**invalidates every issued token**. After a node replacement all users must log
+in again — and a stale token returns a flat `401` that looks exactly like a
+broken authenticator. Before diagnosing anything, compare the token's `kid`
+against Dex's live JWKS:
 
 ```bash
-kubectl get pdb -A -o custom-columns=\
-'NS:.metadata.namespace,NAME:.metadata.name,ALLOWED:.status.disruptionsAllowed'
+curl -s https://dex.$HOST/keys | grep -o '"kid":"[^"]*"'
 ```
 
-Anything showing `ALLOWED: 0` will block a drain. Either scale it to two
-instances first, or expect to move that workload by hand.
+A mismatch means the token predates the last Dex restart. Log in again; nothing
+is wrong. Giving Dex persistent storage (`type: kubernetes`) would remove this
+whole class of confusion and is the obvious next improvement.
 
-**A minor upgrade leaves Pod Security behind.** Project namespaces pin
-`pod-security.kubernetes.io/enforce-version` (see
-`k8s/projects/_template/infra/namespace-*.yaml`), which is deliberate — the
-cluster's admission rules should not change underneath running workloads because
-the control plane moved. The cost is that the pin does not follow the upgrade:
-after moving to `1.37` the namespaces still enforce `1.36` semantics, silently,
-and any policy tightening in the new minor is not applied.
+**Verifying after an upgrade.** Node images are checked with:
 
-So bump the pin as a **separate, later commit** — cluster first, verify, then the
-labels. The `warn`/`audit` labels are intentionally left unpinned, so between the
-two the warnings already show what the newer level would enforce. Every project
-namespace carries the pin; `.github/workflows/checks.yml` fails a project
-namespace committed without one, but it cannot tell a stale pin from a current
-one.
+```bash
+az aks nodepool get-upgrades -g $RG --cluster-name $CLUSTER -n <pool>
+```
 
 ## Backup strategy (Velero)
 
