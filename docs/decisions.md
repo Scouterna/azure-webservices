@@ -24,6 +24,7 @@ say why rather than deleting it.
 | [12](#12-gitops-is-argocd-not-flux) | GitOps is ArgoCD, not Flux | settled |
 | [13](#13-the-default-appproject-is-emptied) | The `default` AppProject is emptied | current |
 | [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
+| [15](#15-the-node-pool-is-pinned-to-one-availability-zone) | The node pool is pinned to one availability zone | current |
 
 ---
 
@@ -571,3 +572,51 @@ including that another project's team is refused.
 **Revisit if** projects ask for the diff view or a self-service sync button.
 Those are real arguments for the UI, and the per-project `resourceNames` work
 done here is not wasted if it is built.
+
+## 15. The node pool is pinned to one availability zone
+
+**Current.** `infra/aks.bicep` sets `zones: ['1']`. The pool was previously
+`['1','2','3']`.
+
+**Why.** Azure managed disks **cannot cross availability zones**. A multi-zone
+pool spreads nodes, so a replacement node can land in a different zone from the
+one holding the cluster's disks — and every pod with a PVC then becomes
+permanently unschedulable, not transiently. `WaitForFirstConsumer` on the
+StorageClass is correct and does not prevent this: it places each disk in
+whatever zone its pod first landed in, which is right at creation time and
+useless once that node is gone.
+
+**Found the hard way, 2026-08-24.** A node-image upgrade replaced the single
+zone-1 node with a zone-2 node. All six existing disks (MinIO, Loki, Grafana,
+Prometheus, Alertmanager, the Postgres primary) stayed pinned to zone 1, and
+their pods sat `Pending` with *"node(s) didn't match PersistentVolume's node
+affinity"* until a second node was added back in zone 1. **Scaling *up* is safe;
+scaling *down* is destructive**, because Azure chooses which node to remove and
+it may be the one whose zone holds the data.
+
+**What is given up.** Nothing that exists today. Zonal redundancy needs more than
+one node to mean anything, so a multi-zone pool on a single-node cluster buys
+fragility without buying availability. Revisit when the node count grows enough
+for zonal HA to be real — and note that at that point stateful workloads need to
+be zone-aware or replicated regardless, because the disk constraint does not go
+away.
+
+**Which zone does not matter.** `D4s_v6` is offered in all three zones in
+`swedencentral` with no restrictions, and pricing is identical. Zone `1` was
+chosen only because the cluster's existing disks are already there.
+
+⚠️ **Logical zone numbers are per-subscription aliases, not physical
+datacentres.** For this subscription:
+
+| Logical (Bicep, `kubectl`) | Physical (Azure status page) |
+|---|---|
+| 1 | `swedencentral-az3` |
+| 2 | `swedencentral-az1` |
+| 3 | `swedencentral-az2` |
+
+This matters when reading an Azure outage notice, which reports **physical**
+zones: a reported problem in `az3` is *this cluster's* zone 1. It would also
+matter if resources were ever split across subscriptions — matching zone numbers
+would not co-locate them. Re-read the live mapping with
+`az rest --method get --uri ".../locations?api-version=2022-12-01"` and look at
+`availabilityZoneMappings`.

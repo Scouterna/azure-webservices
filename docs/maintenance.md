@@ -92,6 +92,23 @@ Thanos, Headlamp.
   (check `az aks get-versions -l <region>`). On a single-node cluster the
   upgrade is briefly disruptive — expect a short control-plane/node blip.
 
+**Scaling down is the dangerous direction.** The pool is pinned to one
+availability zone (`zones: ['1']`, [decisions.md](decisions.md) entry 15) exactly
+so this is safe — Azure disks cannot cross zones, and before the pin a
+replacement node could land in a zone with none of the cluster's data. If the
+pool is ever spread across zones again, check where the disks are before removing
+a node:
+
+```bash
+kubectl get pv -o custom-columns='CLAIM:.spec.claimRef.name,\
+ZONE:.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values'
+kubectl get nodes -L topology.kubernetes.io/zone
+```
+
+A pod whose disk is in a zone with no node stays `Pending` **permanently** with
+*"node(s) didn't match PersistentVolume's node affinity"* — it does not resolve
+on its own, and the fix is to add a node back in that zone.
+
 **Why node images are not on a channel.** On 2026-08-24 an automatic node-image
 upgrade on the test cluster surged a second node, moved every pod onto it, and
 then failed to drain the old one — leaving the pool in `provisioningState:

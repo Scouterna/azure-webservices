@@ -33,8 +33,8 @@ param kubernetesVersion string = '1.36'
 @description('DNS prefix for the managed cluster API server.')
 param dnsPrefix string = clusterName
 
-@description('Availability zones to place the node pool across.')
-param zones string[] = ['1', '2', '3']
+@description('Availability zone for the node pool. ONE zone — Azure disks cannot cross zones, so a multi-zone pool makes node replacement destructive. docs/decisions.md entry 15.')
+param zones string[] = ['1']
 
 @description('VM size for the node pool. D4s_v6 (Intel, 4 vCPU / 16 GB, 12 attachable data disks)')
 param vmSize string = 'Standard_D4s_v6'
