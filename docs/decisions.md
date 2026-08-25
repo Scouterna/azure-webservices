@@ -455,6 +455,23 @@ explicit companion:
   the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
   labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
 
+**`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
+fires on every fresh install, which is correct — no backup has succeeded, so the
+backup path really is blind — but the `critical` route repeats every hour, so a
+worst-case install-to-first-backup window would have produced around 26 Slack posts
+for an expected condition. That is how a channel gets muted, and a muted channel
+looks exactly like coverage.
+
+Downgrading to `warning` was the alternative and was rejected: on a cluster that has
+been up for weeks, a blind backup path is not a warning, and there is no other
+signal for it. So the severity stays honest and the *notification* is what changes —
+an explicit route ahead of the critical one gives both absence alerts a 12h repeat.
+
+The distinction that justifies it: these describe a **standing condition**, not an
+incident. Hourly re-notification tells you nothing new whether the cause is an
+install an hour old or an outage a month old. Anything else `critical` keeps the 1h
+repeat.
+
 Read these as "the rule above has gone blind", not as the underlying fault. They
 deliberately do not suppress their siblings: the chart's inhibit rules match on
 `alertname`, so a firing `VeleroBackupMetricsAbsent` still lets
