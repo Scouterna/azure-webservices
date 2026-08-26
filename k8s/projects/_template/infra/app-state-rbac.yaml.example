@@ -1,0 +1,96 @@
+# Lets ONE app read and write ONE ConfigMap in each of its namespaces — the
+# cheapest tier of persistent state (docs/decisions.md entry 18). Infra-owned
+# because a ServiceAccount mints an identity; the project cannot grant itself one.
+#
+# dev + prod, the default. RBAC does not cross namespaces, so each environment
+# needs its own trio — a ServiceAccount, a Role and a RoleBinding.
+#
+# BEFORE COMMITTING:
+#   - replace PROJECT and APP throughout
+#   - rename to app-state-rbac.yaml (the .example is never synced)
+#
+# ONE environment only? Delete the prod half. ADDING staging? Copy a half.
+#
+# The app sets `serviceAccountName: APP-state` on its Pod and writes the
+# ConfigMap through the Kubernetes API. The ConfigMap itself is NOT created
+# here — the app creates it on first run, or the project commits it to its own
+# repo, since ConfigMap is in the project's GitOps whitelist.
+#
+# 1 MiB is the API server's hard cap, and every write rewrites the whole object
+# through etcd. Occasional small state only — for anything larger or
+# write-heavy, use the shared PostgreSQL or an azurefile PVC.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: APP-state
+  namespace: PROJECT-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: APP-state
+  namespace: PROJECT-dev
+rules:
+  # resourceNames confines the app to its own state object. Without it this
+  # grants write access to every ConfigMap in the namespace.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["APP-state"]
+    verbs: ["get", "update", "patch"]
+  # `create` cannot be name-scoped — the name does not exist yet at admission.
+  # Drop this rule if the ConfigMap is committed rather than created at runtime.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: APP-state
+  namespace: PROJECT-dev
+subjects:
+  - kind: ServiceAccount
+    name: APP-state
+    namespace: PROJECT-dev
+roleRef:
+  kind: Role
+  name: APP-state
+  apiGroup: rbac.authorization.k8s.io
+---
+# Same app, prod namespace. A Role and a RoleBinding are namespaced and do NOT
+# cross namespaces, so each one needs its own. The names may repeat — they only
+# have to be unique within a namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: APP-state
+  namespace: PROJECT-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: APP-state
+  namespace: PROJECT-prod
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["APP-state"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: APP-state
+  namespace: PROJECT-prod
+subjects:
+  - kind: ServiceAccount
+    name: APP-state
+    namespace: PROJECT-prod
+roleRef:
+  kind: Role
+  name: APP-state
+  apiGroup: rbac.authorization.k8s.io

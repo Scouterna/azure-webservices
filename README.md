@@ -202,6 +202,7 @@ touchpoints are few and isolated:
 |---|---|---|
 | AKS control plane | `infra/aks.bicep` | Replace the Bicep layer; all of `k8s/` moves as-is |
 | `disk.csi.azure.com` StorageClass | `cluster-infra/storageclass/` | Change the provisioner; keep the class names |
+| `file.csi.azure.com` StorageClass (`files-shared`) | `cluster-infra/storageclass/` | Change the provisioner to the platform's shared-filesystem driver (NFS, CephFS, EFS); keep the class name. Semantics differ — see [decisions.md entry 18](docs/decisions.md#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) |
 | LoadBalancer annotations | `traefik/values.yaml` | Provider's LB annotations, or MetalLB |
 | Secrets backend (Key Vault) | External Secrets `ClusterSecretStore` | Swap the store (Vault/AWS/GCP); `ExternalSecret`s unchanged |
 | Audit logs + alerting | `infra/loganalytics.bicep`, `infra/alerts.bicep`, the diagnostic setting in `aks.bicep` | No portable equivalent — the API-server audit feed is the provider's. Re-point at the new platform's log sink |

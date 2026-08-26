@@ -26,6 +26,8 @@ say why rather than deleting it.
 | [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
 | [15](#15-the-node-pool-is-pinned-to-one-availability-zone) | The node pool is pinned to one availability zone | current |
 | [16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb) | Node-image upgrades stay automatic; the shared Postgres has no PDB | current |
+| [17](#17-minio-backs-observability-it-is-not-general-purpose-storage) | MinIO backs observability; it is not general-purpose storage | current |
+| [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
 
 ---
 
@@ -493,6 +495,7 @@ false-alarm. Left open rather than guessed.
 **ArgoCD was not being scraped at all** — it ships metrics Services and no
 ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
 rule has a target before trusting it (install.md §11).
+
 ## 12. GitOps is ArgoCD, not Flux
 
 **Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
@@ -743,3 +746,187 @@ auth-code state — not done here, but no longer blocked.
 before suspecting anything else ([maintenance.md](maintenance.md)). Keys now
 survive restarts, but a token older than a key *rotation* still fails, and that
 check distinguishes it from a real fault in seconds.
+
+## 17. MinIO backs observability; it is not general-purpose storage
+
+**Current.** MinIO exists to give Loki and Thanos the S3-compatible API they
+require, and holds only the `loki` and `thanos` buckets. It is not offered to
+projects. The [README](../README.md) states this and
+[maintenance.md](maintenance.md) records the backup posture that follows from it;
+this entry records only *why*, because people read "there is MinIO in the
+cluster" as "there is S3 storage I can use" and the conclusion alone did not
+prevent that.
+
+**The reason is the backup assumption, not the disk space.** Everything in MinIO
+today is *derived* — metrics and logs Prometheus and Loki have already flushed.
+That is what justifies excluding the namespace from the daily Velero schedule.
+Project state is not derived, so putting it there would make an accepted risk
+wrong **without anything reporting that it had changed** — and the failure mode
+is that the data sits in no backup path at all: not Velero (namespace excluded),
+not Barman (Postgres only).
+
+Two further blockers, either of which would need solving first: there is no
+per-project credential (the install writes a single root user/password to Key
+Vault), and MinIO is a single replica on one PVC that Loki, Thanos and the backup
+flow all already depend on.
+
+**Revisit when** a project genuinely needs object-storage semantics — an S3 SDK,
+blobs, versioning — rather than somewhere to keep a few KB. That is two pieces of
+work, not one: per-project credentials **and** a backup story MinIO does not have
+today. The trap is building it *because MinIO is already installed*; that
+reasoning is what would put project data on the observability volume. A second,
+separate instance is the honest answer, not converting this one.
+
+**Give that instance its own name — not "the other MinIO".** The misreading this
+entry exists to prevent came from the *product* name being visible while its
+scope was not, so two things called MinIO would reproduce it exactly. `minio`
+stays the observability store; the project-facing one should be named for what it
+offers. Avoid `objectstore`: CNPG already has an `ObjectStore` kind in this
+cluster (`shared-store` in `postgres`), and reusing the word would collide with
+something that exists.
+
+**What building it would take**, so this does not need investigating again. The
+deployment itself is the easy half — copy the shape of `minio.yaml` and
+`k8s/infra-manifest/minio/`, which is one Application, a values file and a
+bucket-creation Job. Sizing follows the disk-tier rule: an exact E-tier PVC on
+`disk-standardssd`, and it **costs one of the ~6 remaining attached disks**
+unless it is put on `files-shared` instead. Two traps are already solved in the
+existing install and must be carried over, not rediscovered: the chart's built-in
+`buckets:` provisioning uses a Helm post-install hook that ArgoCD skips when the
+first sync is not clean, so buckets silently never appear — use a standalone
+idempotent Job; and the chart's own `metrics.serviceMonitor` hardcodes
+`release: <release-name>`, which our Prometheus ignores, so the ServiceMonitor
+must be a plain manifest.
+
+The work that does **not** exist yet, and is the real cost:
+
+- **Per-project users and bucket policies.** Today the install writes a single
+  root credential to Key Vault; there is no per-tenant identity of any kind.
+  This needs `mc admin user add` plus a policy per project in the provisioning
+  Job, and credential delivery through ExternalSecret or SealedSecret with the
+  same opt-in discipline the Key Vault store uses.
+- **Deciding the backup posture deliberately.** The daily Velero schedule is
+  `includedNamespaces: "*"` **minus an exclusion list**, so a new namespace is
+  backed up by default — the opposite of the `minio` namespace's situation, which
+  is excluded by name. That default is right here, but it must be a decision
+  rather than an accident, and PVC snapshots of project blobs are not free.
+- **An ingress, if projects need presigned URLs or browser uploads.** MinIO is
+  in-cluster only today (no ingress by choice). Adding one is a Traefik
+  IngressRoute plus a certificate, and it makes the store publicly reachable —
+  which is a different security question from anything MinIO answers today.
+
+**The strongest argument for building it is the billing model, not the API.**
+Its cost is the PVC underneath it — fixed, and paid once by the platform. S3
+calls against it are in-cluster traffic and cost nothing per operation, whereas
+`files-shared` bills every write and list ([entry
+16](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)). For a
+write-heavy project on a centrally-paid cluster that difference is the whole
+decision: a workload that would cost tens of euros a month on `files-shared`
+costs nothing extra here beyond the disk already provisioned. It also puts a
+single reviewable number on the shared bill instead of a per-project variable one
+nobody is watching.
+
+**Where it sits in the four tiers ([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)): it is not a fifth tier, it is a
+narrower one.** For "somewhere to keep files" the answer stays `files-shared` — it
+is already RWX, already backed up, and costs no attached disk. A project-facing
+object store is only the right answer when the application genuinely speaks S3:
+an SDK, presigned URLs, versioned objects, or a library that has no filesystem
+mode. That is a real requirement when it appears, and it is the *only* case that
+justifies the work above.
+
+## 18. Persistent state has four tiers, and a disk is the last one
+
+**Current.** A project needing state that survives pod restarts has four
+options. They are ordered by cost, and the smallest need has the cheapest
+answer:
+
+| Need | Use | Cost |
+|---|---|---|
+| A few KB, key-value | ConfigMap or Secret + a scoped ServiceAccount | zero |
+| Structured, queryable, transactional | the shared PostgreSQL | zero — already onboarded |
+| Files, a few MB to GB | a `files-shared` PVC (RWX) | zero attached disks |
+| High-IOPS block storage | a `disk-*` PVC | one of a small, fixed pool |
+
+**Why this needs stating.** `hostPath` was the obvious answer on the previous
+platform and is now rejected at admission by baseline Pod Security (decision 3) —
+correctly, since a hostPath pod reaches the node. Without a stated alternative
+the next reflex is a `disk-*` PVC, and **attached disks are the cluster's
+binding scaling limit**, not CPU or memory: a `Standard_D4s_v6` node takes 12,
+and the platform's own components already hold 6.
+
+**`files-shared` does not consume that budget.** It is backed by
+`file.csi.azure.com` — an SMB share over the network, not a block device attached
+to the VM — so the disk ceiling does not apply to it. It is also
+`ReadWriteMany`, so unlike `hostPath` it survives the pod moving to another node.
+
+**It is Azure-backed, and that is a real tension with "portable by intent".** The
+mitigation is the same one the `disk-*` classes already use: the platform owns
+the StorageClass and gives it a **neutral name**, so a project's PVC says
+`files-shared` and never `azurefile-csi`. Moving to another platform is then a
+change to one StorageClass object rather than an edit to every project's repo,
+and it joins the short list in [Portability](../README.md#portability) instead of
+spreading through `k8s/`.
+
+**That is a mitigation, not an escape, so the tier is offered rather than
+pushed.** A shared filesystem on another platform is a different implementation
+with different semantics, not a drop-in — the class name survives a move, the
+performance and locking behaviour may not. Reach for it when files are genuinely
+the right shape for the data; prefer the shared PostgreSQL, which is already
+portable by construction, whenever the data would fit there.
+
+**Cost is a shared concern, not the project's.** Almost every project on this
+cluster is paid centrally, so a project cannot feel the price of its own storage
+choice — the guidance here has to carry the weight the invoice does not. Two of
+the four tiers bill in a way that a project would not predict:
+
+| Tier | How it bills |
+|---|---|
+| ConfigMap / PostgreSQL | no marginal cost — already provisioned |
+| `files-shared` | **per GB used *and per operation*** |
+| `disk-*` | fixed per E-tier, regardless of use; transactions negligible |
+
+**`files-shared` is the cheap tier for storage and the expensive one for
+traffic**, and the crossover is lower than it looks. Storage is roughly a tenth
+of a `disk-*` PVC's price and bills only what is used rather than the whole
+provisioned tier. But writes and lists are billed per 10k operations, so a
+fixed 32Gi `disk-*` PVC costs the same as about **370,000 `files-shared`
+operations a month** — around 0.14 writes a second, sustained. Below that, files
+is much cheaper; above it, the disk is.
+
+In practice that means state-shaped access is fine and request-shaped access is
+not. A checkpoint written every 30 seconds is cents a month. Session state
+written once per request at 5 req/s is roughly **$85 a month** against $2.40 for
+the disk it replaced — and nothing warns anyone, because it appears only on a
+central invoice nobody reads per project. **Ask how often it is written, not just
+how big it is.**
+
+**Limits worth knowing before choosing:**
+
+- A ConfigMap or Secret is capped at **1 MiB** by the API server, and every write
+  goes through etcd and rewrites the whole object. Suits small state written
+  occasionally; not a write-per-request store. Stay well under the cap rather
+  than approaching it, and use a Secret rather than a ConfigMap when the content
+  is sensitive.
+- `files-shared` is SMB: higher latency, weaker file locking, no `O_DIRECT`. Fine
+  for state and config files. **Do not put a SQLite database on it** — that
+  combination corrupts under lock contention. Use the shared PostgreSQL instead.
+- **Nothing warns you when the disk pool runs out.** The node does not publish
+  `attachable-volumes-azure-disk` in `Allocatable`, so the limit is enforced by
+  Azure at attach time, not by the scheduler. It surfaces as a pod stuck
+  starting, not as a scheduling failure.
+
+**ServiceAccount, Role and RoleBinding stay infra-granted.** The ConfigMap tier
+needs them, and they are excluded from the project GitOps whitelist deliberately
+— a ServiceAccount mints an identity (decision 8). Infra commits them under
+`k8s/projects/PROJECT/infra/`, the same Layer 1 route as a database. The Role
+should name the object with `resourceNames`, so the app can write its own state
+and nothing else.
+
+**There is no object-storage tier, and that is deliberate.** For files, the
+`files-shared` row above is the answer. A project-facing S3 store would be a
+narrower tier than that one, not an extra option beside it — only right when an
+application genuinely speaks S3 rather than wanting somewhere to keep files.
+[Entry 17](#17-minio-backs-observability-it-is-not-general-purpose-storage)
+records what standing one up would cost.
+
+See [onboarding.md](onboarding.md) for the recipes.
