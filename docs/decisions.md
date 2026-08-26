@@ -432,6 +432,61 @@ from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, 
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
 
+**A rule goes silent when its exporter does, and that is not obvious.** Every rule
+above needs its series to *exist*: `== 1`, `increase()` and `time() - metric` all
+return nothing when the metric is absent, so the alert cannot fire at the moment the
+component it watches disappears. `VeleroNoRecentBackup` was the clearest case —
+Velero uninstalled, crashed, or never having completed a backup all produced no
+series and therefore no alert.
+
+The chart's `TargetDown` is the generic net, but it is `warning`-severity, needs
+more than 10% of a job's targets down, and cannot fire at all if the ServiceMonitor
+itself is gone. So the two cases where *absence is itself the failure* get an
+explicit companion:
+
+- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`. It fires on a
+  fresh cluster until the first 02:00 run, which is correct rather than a false
+  positive: no backup has succeeded, so backup alerting really is blind. The
+  window covers a series that existed and vanished; a series that has **never**
+  existed is reported from the first evaluation, so only `for:` delays anything.
+  Sizing `for:` to cover install-to-first-backup would be ~26h, which would also
+  delay a real Velero outage by 26h — not worth it.
+- **`ArgoCDMetricsAbsent`** — the more useful of the two, because it also catches
+  the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
+  labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
+
+**`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
+fires on every fresh install, which is correct — no backup has succeeded, so the
+backup path really is blind — but the `critical` route repeats every hour, so a
+worst-case install-to-first-backup window would have produced around 26 Slack posts
+for an expected condition. That is how a channel gets muted, and a muted channel
+looks exactly like coverage.
+
+Downgrading to `warning` was the alternative and was rejected: on a cluster that has
+been up for weeks, a blind backup path is not a warning, and there is no other
+signal for it. So the severity stays honest and the *notification* is what changes —
+an explicit route ahead of the critical one gives both absence alerts a 12h repeat.
+
+The distinction that justifies it: these describe a **standing condition**, not an
+incident. Hourly re-notification tells you nothing new whether the cause is an
+install an hour old or an outage a month old. Anything else `critical` keeps the 1h
+repeat.
+
+Read these as "the rule above has gone blind", not as the underlying fault. They
+deliberately do not suppress their siblings: the chart's inhibit rules match on
+`alertname`, so a firing `VeleroBackupMetricsAbsent` still lets
+`VeleroBackupFailing` through if it can fire at all.
+
+**ESO and CNPG deliberately do not get one.** Their failures surface elsewhere — a
+workload breaks on the next rotation, and `TargetDown` covers the endpoint — so a
+companion each would add noise for little signal. The CNPG case is the weaker
+argument of the two: archiving could fail while the exporter is also down. The
+better fix there is a staleness rule on
+`cnpg_pg_stat_archiver_seconds_since_last_archival` (a metric the dashboards
+already use), which detects the actual bad state rather than the monitoring gap —
+but it needs to know whether `archive_timeout` is set, or an idle database will
+false-alarm. Left open rather than guessed.
+
 `argocd_app_info` is the exception with no corroboration in the repo, because
 **ArgoCD was not being scraped at all** — it ships metrics Services and no
 ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that

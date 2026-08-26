@@ -178,6 +178,12 @@ alertmanager:
         # single-node cluster and would drown the rest on day one.
         - matchers: ['severity = "info"']
           receiver: "null"
+        # Standing conditions, not incidents: severity is right, but hourly
+        # nagging adds nothing whether it is a fresh install or a month-old
+        # outage. Must precede the critical route to win. docs/decisions.md 11.
+        - matchers: ['alertname =~ "VeleroBackupMetricsAbsent|ArgoCDMetricsAbsent"']
+          receiver: slack
+          repeat_interval: 12h
         - matchers: ['severity = "critical"']
           receiver: slack
           repeat_interval: 1h

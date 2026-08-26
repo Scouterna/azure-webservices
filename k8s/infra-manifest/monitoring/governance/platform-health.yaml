@@ -66,6 +66,45 @@ spec:
               The database is up; its backups are not. Point-in-time recovery is
               degraded for as long as this persists — see docs/maintenance.md.
 
+        # --- Absence companions -------------------------------------------
+        # Every rule above needs its series to EXIST. If the exporter stops, the
+        # expression returns nothing and the alert cannot fire — silent exactly
+        # when it matters. These two say "the rule above has gone blind".
+
+        - alert: VeleroBackupMetricsAbsent
+          # No backup metric at all: Velero is gone, or has never completed one.
+          # Fires on a fresh cluster until the first 02:00 run — correct, not a
+          # fault. The 48h covers a series that vanished, not one never seen.
+          expr: |
+            absent_over_time(velero_backup_last_successful_timestamp[48h])
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No Velero backup metrics — backup alerting is blind"
+            description: >-
+              Either no backup has ever succeeded, or Velero has stopped reporting.
+              VeleroBackupFailing and VeleroNoRecentBackup both need this series to
+              exist, so neither can fire while this is true. On a cluster installed
+              in the last day this is expected and clears at the first 02:00 run.
+
+        - alert: ArgoCDMetricsAbsent
+          # Either ArgoCD stopped reporting, or the ServiceMonitor selector no
+          # longer matches — the upstream manifest owns those labels and can
+          # change them on an ArgoCD upgrade.
+          expr: |
+            absent_over_time(argocd_app_info[1h])
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD has not reported app state for over an hour"
+            description: >-
+              ArgoCDAppNotSynced is inert while this is true, so drift is
+              undetected. Check the argocd-metrics ServiceMonitor still matches
+              ArgoCD's Service labels (install.md §11) before assuming ArgoCD itself
+              is down.
+
         - alert: ArgoCDAppNotSynced
           # If ArgoCD stops converging, every control in this repo silently stops
           # being enforced — including the ones that self-heal drift.

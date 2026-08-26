@@ -1122,12 +1122,39 @@ never fires and looks identical to a healthy cluster:
 ```bash
 # expect argocd-metrics UP, and a non-empty result for the metric the rule uses
 kubectl -n monitoring get servicemonitor argocd-metrics
-kubectl -n monitoring exec sts/prometheus-kps-kube-prometheus-stack-prometheus -c prometheus   -- wget -qO- 'localhost:9090/api/v1/query?query=argocd_app_info' | head -c 300
+
+# The Prometheus container has no shell and no wget — query it over a port-forward.
+kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 &
+curl -s 'localhost:9090/api/v1/query?query=argocd_app_info' | head -c 300
+kill %1
 ```
 
 An empty `result` array means the scrape is not working — check the ServiceMonitor
 selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
 manifest owns and can change on an ArgoCD upgrade.
+
+Two of the seven rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
+`VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
+a broken scrape reports itself instead of looking like a healthy cluster.
+
+**Expect `VeleroBackupMetricsAbsent` to fire on a fresh install** — about an hour
+after Prometheus starts (its `for: 1h`), staying firing until the first 02:00 backup
+completes. That is correct, not a fault: no backup has ever succeeded, so backup
+alerting really is blind. It clears itself at the first successful run. Note the
+`[48h]` in the expression gives **no** grace here — `absent_over_time` reports a
+series that has never existed from the first evaluation, so only `for:` delays
+anything. It is routed at a 12h repeat rather than the 1h that `critical`
+normally gets, so expect roughly two messages across that window rather than one an
+hour ([decisions.md](decisions.md) entry 11).
+
+```bash
+kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 &
+curl -s 'localhost:9090/api/v1/rules' | grep -o '"name":"[A-Za-z]*Absent"'
+kill %1
+```
+
+Expect both names. If a rule is missing entirely, the PrometheusRule was not picked
+up — check it carries `release: kps`.
 
 ### Dual-stack DNS
 
