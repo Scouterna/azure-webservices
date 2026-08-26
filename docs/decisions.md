@@ -754,8 +754,8 @@ give Loki and Thanos the S3-compatible API they require, and holds only the `lok
 and `thanos` buckets. It is not offered to projects.
 
 **It runs MinIO, but it is not called MinIO — and that is the point.** People read
-"there is MinIO in the cluster" as "there is S3 storage I can use", because a
-product name advertises a capability while saying nothing about who may use it.
+"there is MinIO in the cluster" as "there is S3 storage I can use", and they are
+right to: naming a service after its software is an offer of that software.
 Stating the scope next to the name did not prevent the misreading: the name is
 read, the sentence after it is skimmed. So the service is named for its *job*
 instead, and the name **MinIO is deliberately kept free** for a project-facing
@@ -764,9 +764,13 @@ The software is still MinIO and the charts, images and upstream labels still say
 so; what changed is that the platform no longer *offers* something called MinIO
 that nobody may use.
 
-Avoid `objectstore` as a name: CNPG already has an `ObjectStore` kind in this
-cluster (`shared-store` in `postgres`), and reusing the word would collide with
-something that exists.
+**A project-facing object store will simply be called `minio`** — the same way the
+shared database is called PostgreSQL rather than something abstract. A product
+name is the right name for a thing projects may actually use: it tells them what
+API to expect and what documentation to read. The rule is not "avoid product
+names", it is **name a service after the software only when projects can use it**.
+That is exactly why the telemetry store is not called MinIO, and why a project
+store would be.
 
 **The reason it is closed to projects is the backup assumption, not the disk
 space.** Everything in the store today is *derived* — metrics and logs Prometheus
@@ -787,8 +791,8 @@ blobs, versioning — rather than somewhere to keep a few KB. That is two pieces
 work, not one: per-project credentials **and** a backup story this store does not
 have today. The trap is building it *because MinIO is already installed*; that
 reasoning is what would put project data on the observability volume. A second,
-separate instance is the honest answer, not converting this one — **and it is the
-one that gets to be called `minio`**, which is why that name is kept free.
+separate instance is the honest answer, not converting this one — and it is the
+one that gets to be called `minio`.
 
 **What building it would take**, so this does not need investigating again. The
 deployment itself is the easy half — copy the shape of `telemetry-store.yaml` and
