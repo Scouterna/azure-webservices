@@ -61,7 +61,7 @@ is excluded.
    grep -rlZ PROJECT "k8s/projects/$PROJECT/" | xargs -0 sed -i "s/PROJECT/$PROJECT/g"
    ```
 
-   **Check it before moving on** — the file list should be 7 files, all under
+   **Check it before moving on** — the file list should be 8 files, all under
    `k8s/projects/$PROJECT/`, and no `PROJECT` may remain:
 
    ```bash
@@ -747,6 +747,155 @@ namespace: the `Database` and `DatabaseRole` must live beside the shared cluster
 > Deleting a project's file does **not** drop its data — `prune` is disabled on
 > the `postgres-databases` app and `databaseReclaimPolicy: retain` is set.
 > Retiring a database is deliberate; see [postgres.md](postgres.md).
+
+## Persistent state for your app
+
+State that must survive a pod restart. `emptyDir` does not, and **`hostPath` is
+rejected at admission** by the namespace's Pod Security level — a hostPath pod
+reaches the node, so that door is closed deliberately
+([security.md](security.md) §2).
+
+Pick the smallest tier that fits. A `disk-*` PVC is the last resort, not the
+default: **attached disks are the cluster's binding scaling limit**, and the
+platform's own components already hold half the node's budget
+([decisions.md](decisions.md) entry 18).
+
+| Your need | Use | Costs a disk? |
+|---|---|---|
+| A few KB, key-value | a ConfigMap (or Secret) your app writes | no |
+| Structured, queryable, transactional | the shared PostgreSQL — [Add a database](#add-a-database-postgresql) | no |
+| Files, a few MB to GB | a `files-shared` PVC | **no** |
+| High-IOPS block storage | a `disk-*` PVC | **yes — ask infra first** |
+
+MinIO is not on this list. It backs Loki and Thanos and is not offered to
+projects; [decisions.md](decisions.md) entry 17 says why.
+
+> **Tell us how often it is written, not just how big it is.** The cluster is
+> paid centrally, so your storage choice does not appear on your own budget — but
+> it is real money, and one of these tiers bills per operation. A
+> `files-shared` volume costs almost nothing to store a few GB, and roughly
+> **$85 a month** if an app writes to it once per request at 5 requests a second.
+> A `disk-*` PVC of the same size is a flat $2.40 however hard it is used.
+>
+> So the question that decides the tier is the write pattern:
+>
+> - **Occasional** — a checkpoint, a config file, a nightly export → `files-shared`
+>   is the cheapest thing on this page.
+> - **Per request** — session state, a counter, a log → do **not** use
+>   `files-shared`. Use the shared PostgreSQL, which is already provisioned and
+>   costs nothing per write.
+>
+> If you are unsure, say so when you ask infra — this one is easy to get wrong
+> and invisible when you do.
+
+### A few KB — a ConfigMap the app writes
+
+The app reads and writes one ConfigMap through the Kubernetes API. It needs its
+own ServiceAccount and a Role, and **infra commits those** — a ServiceAccount
+mints an identity, so it is Layer 1 like a database, not something a project
+grants itself ([decisions.md](decisions.md) entry 8).
+
+**Project: ask infra**, saying which app, which namespace(s), and the name you
+want for the state object. Then set `serviceAccountName: <app>-state` on your
+Pod and read/write the ConfigMap with your language's Kubernetes client. You
+create the ConfigMap yourself — it is in your GitOps whitelist, or your app can
+create it on first run.
+
+**Infra: grant it.** One commit, in the project's own directory:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/k8s/projects/$PROJECT/infra"
+cp app-state-rbac.yaml.example app-state-rbac.yaml   # dropping .example is what makes it sync
+```
+
+Replace `PROJECT` and `APP` throughout. The template ships **dev and prod**, like
+`database.yaml.example` — RBAC does not cross namespaces, so each environment
+needs its own ServiceAccount, Role and RoleBinding. A single-namespace project
+deletes the prod half; a project with staging copies one. The template's
+`resourceNames` confines the app to its own object; leave it in place.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+git add "k8s/projects/$PROJECT/infra/app-state-rbac.yaml"
+git status --short                   # only that file should be staged
+git diff --cached                    # check the namespaces and names before pushing
+git commit -m "Grant $PROJECT app-state RBAC"
+git push
+```
+
+Confirm once ArgoCD has synced — and check the scoping actually bites, since a
+missing `resourceNames` looks identical until someone tests it:
+
+```bash
+SA=system:serviceaccount:<namespace>:<app>-state
+kubectl auth can-i update configmaps/<app>-state -n <namespace> --as=$SA   # yes
+kubectl auth can-i update configmaps/other       -n <namespace> --as=$SA   # no
+kubectl auth can-i get    secrets                -n <namespace> --as=$SA   # no
+```
+
+> **The filename matters.** The `project-infra` ApplicationSet syncs an explicit
+> list of filenames, and **a file matching none of them is ignored silently** —
+> ArgoCD still reports `Synced`/`Healthy`. `app-state-rbac.yaml` is on that list;
+> a different name is not. If the RBAC never appears, check the name first.
+
+**Limits.** The API server caps a ConfigMap or Secret at **1 MiB** and rejects
+anything larger outright. Every write goes through etcd and rewrites the whole
+object, so this suits state written occasionally — a cursor, a checkpoint, a
+small config — not a write per request. Stay well under the cap rather than
+approaching it. **If the content is sensitive, use a `Secret` instead**; the
+mechanics are identical, and `admin` in your own namespace can read it either
+way.
+
+### A few MB of files — a `files-shared` PVC
+
+For anything file-shaped that a ConfigMap cannot hold. This is the honest
+`hostPath` replacement, and it is better than what it replaces: `ReadWriteMany`,
+so it survives the pod being rescheduled to another node.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: APP-state
+  namespace: PROJECT-dev
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: files-shared
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+Mount it as usual. It is backed up by Velero along with the rest of your
+namespace (see below) — no extra step.
+
+**Why this one does not cost a disk.** `files-shared` is backed by
+`file.csi.azure.com` — an SMB share over the network, not a block device
+attached to the node — so the attached-disk ceiling does not apply.
+
+**Use the class name, not the provisioner.** `files-shared` is this platform's
+name for "a shared filesystem"; the Azure driver behind it is an implementation
+detail that infra can change. Writing `azurefile-csi` in your manifests instead
+pins them to Azure, and moving the cluster would then mean editing every
+project's repo — see [Portability](../README.md#portability).
+
+**Limits.** SMB semantics: higher latency, weaker file locking, no `O_DIRECT`.
+Fine for state and config files. **Do not put a SQLite database on it** — that
+combination corrupts under lock contention. Use the shared PostgreSQL for
+anything wanting real transactions.
+
+**And it bills per operation.** Storing the data is the cheap part; every write
+and directory listing is charged. That is why the write pattern decides the tier
+— see the note above the table. Occasional writes are cents a month; a write per
+request is not.
+
+### When you genuinely need a `disk-*` PVC
+
+Real block storage, high IOPS. **Talk to infra before committing one.** The node
+takes a fixed number of attached disks and the platform already uses half of
+them; nothing warns you when the pool runs out, because the limit is enforced by
+Azure at attach time rather than by the scheduler. It surfaces as a pod stuck
+starting.
 
 ## Namespace & PVC backups (Velero)
 
