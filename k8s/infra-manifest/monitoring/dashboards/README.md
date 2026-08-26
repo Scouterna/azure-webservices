@@ -16,7 +16,7 @@ does not depend on grafana.com being reachable.
 | `cert-manager.json` | grafana.com **11001** | Certificate expiry countdown |
 | `velero.json` | grafana.com **11055** | Backup success/failure/duration |
 | `external-secrets.json` | [external-secrets repo][eso] | |
-| `minio.json` | [minio repo][minio] | The telemetry store's dashboard (it runs MinIO). Scraped via `telemetry-store/servicemonitor.yaml`, not the chart |
+| `telemetry-store.json` | [minio repo][minio] | The telemetry store (it runs MinIO). Scraped via `telemetry-store/servicemonitor.yaml`, not the chart |
 | `thanos-query.json` / `-store` / `-compact` | [thanos repo][thanos] | |
 | `loki.json` | [loki repo][loki] `loki-chunks` | **Adapted**, see below |
 | `namespace-usage.json` | hand-written | Ours, not vendored — same flow as the rest |

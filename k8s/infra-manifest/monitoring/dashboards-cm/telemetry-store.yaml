@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dashboard-minio
+  name: dashboard-telemetry-store
   namespace: monitoring
   labels:
     grafana_dashboard: '1'
 data:
-  minio.json: |
+  telemetry-store.json: |
     {
       "annotations": {
         "list": [
@@ -3795,6 +3795,7 @@ data:
       "refresh": "",
       "schemaVersion": 39,
       "tags": [
+        "telemetry-store",
         "minio"
       ],
       "templating": {
@@ -3870,7 +3871,7 @@ data:
         ]
       },
       "timezone": "",
-      "title": "MinIO Dashboard",
+      "title": "Telemetry store (MinIO)",
       "uid": "TgmJnqnnk",
       "version": 1,
       "weekStart": ""
