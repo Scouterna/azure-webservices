@@ -25,8 +25,8 @@ param vmSize string = 'Standard_D4s_v6'
 @description('Node count (manual scaling).')
 param nodeCount int = 1
 
-@description('Availability zones.')
-param zones string[] = ['1', '2', '3']
+@description('Availability zone — ONE. Azure disks cannot cross zones; see docs/decisions.md entry 15.')
+param zones string[] = ['1']
 
 @description('Durable Log Analytics workspace receiving API-server audit logs. Must exist before this deploys — docs/install.md §5b.')
 param auditWorkspaceName string

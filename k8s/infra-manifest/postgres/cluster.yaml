@@ -58,6 +58,9 @@ spec:
   # so it is not real HA, and it costs one of the node's 12 attachable-disk slots
   # (the binding limit here — see docs/postgres.md). Raise to 2 with a 2nd node.
   instances: 1
+  # At instances: 1 the PDB is unsatisfiable and blocks every node drain.
+  # docs/decisions.md entry 16.
+  enablePDB: false
   imageName: ghcr.io/cloudnative-pg/postgresql:17
   storage:
     size: 32Gi                     # exact Azure SSD tier (E4). Grow by tier.

@@ -24,6 +24,8 @@ say why rather than deleting it.
 | [12](#12-gitops-is-argocd-not-flux) | GitOps is ArgoCD, not Flux | settled |
 | [13](#13-the-default-appproject-is-emptied) | The `default` AppProject is emptied | current |
 | [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
+| [15](#15-the-node-pool-is-pinned-to-one-availability-zone) | The node pool is pinned to one availability zone | current |
+| [16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb) | Node-image upgrades stay automatic; the shared Postgres has no PDB | current |
 
 ---
 
@@ -626,3 +628,118 @@ including that another project's team is refused.
 **Revisit if** projects ask for the diff view or a self-service sync button.
 Those are real arguments for the UI, and the per-project `resourceNames` work
 done here is not wasted if it is built.
+
+## 15. The node pool is pinned to one availability zone
+
+**Current.** `infra/aks.bicep` sets `zones: ['1']`. The pool was previously
+`['1','2','3']`.
+
+**Why.** Azure managed disks **cannot cross availability zones**. A multi-zone
+pool spreads nodes, so a replacement node can land in a different zone from the
+one holding the cluster's disks — and every pod with a PVC then becomes
+permanently unschedulable, not transiently. `WaitForFirstConsumer` on the
+StorageClass is correct and does not prevent this: it places each disk in
+whatever zone its pod first landed in, which is right at creation time and
+useless once that node is gone.
+
+**Found the hard way, 2026-08-24.** A node-image upgrade replaced the single
+zone-1 node with a zone-2 node. All six existing disks (MinIO, Loki, Grafana,
+Prometheus, Alertmanager, the Postgres primary) stayed pinned to zone 1, and
+their pods sat `Pending` with *"node(s) didn't match PersistentVolume's node
+affinity"* until a second node was added back in zone 1. **Scaling *up* is safe;
+scaling *down* is destructive**, because Azure chooses which node to remove and
+it may be the one whose zone holds the data.
+
+**What is given up.** Nothing that exists today. Zonal redundancy needs more than
+one node to mean anything, so a multi-zone pool on a single-node cluster buys
+fragility without buying availability. Revisit when the node count grows enough
+for zonal HA to be real — and note that at that point stateful workloads need to
+be zone-aware or replicated regardless, because the disk constraint does not go
+away.
+
+**Which zone does not matter.** `D4s_v6` is offered in all three zones in
+`swedencentral` with no restrictions, and pricing is identical. Zone `1` was
+chosen only because the cluster's existing disks are already there.
+
+⚠️ **Logical zone numbers are per-subscription aliases, not physical
+datacentres.** For this subscription:
+
+| Logical (Bicep, `kubectl`) | Physical (Azure status page) |
+|---|---|
+| 1 | `swedencentral-az3` |
+| 2 | `swedencentral-az1` |
+| 3 | `swedencentral-az2` |
+
+This matters when reading an Azure outage notice, which reports **physical**
+zones: a reported problem in `az3` is *this cluster's* zone 1. It would also
+matter if resources were ever split across subscriptions — matching zone numbers
+would not co-locate them. Re-read the live mapping with
+`az rest --method get --uri ".../locations?api-version=2022-12-01"` and look at
+`availabilityZoneMappings`.
+
+## 16. Node-image upgrades stay automatic, and the shared Postgres has no PDB
+
+**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, and
+`enablePDB: false` on the shared CloudNativePG cluster.
+
+**Why automatic, having been burned by it.** On 2026-08-24 an automatic
+node-image upgrade left the test cluster's pool in `provisioningState: Failed`,
+billing two nodes, and appeared to break SSO. Moving to a manual channel was
+implemented and then **rejected**: this platform is maintained by volunteers,
+node images ship roughly weekly carrying OS CVE fixes, and a manual step that is
+forgotten is worse than an automatic one that occasionally disrupts. **The right
+response was to make the disruption survivable, not to move it into a runbook
+nobody runs.**
+
+**Why the drain wedged, and why the PDB goes.** CNPG creates a
+`PodDisruptionBudget` selecting `cnpg.io/instanceRole: primary` — it protects
+whichever pod is currently primary, always exactly one. At `instances: 1` that
+makes `disruptionsAllowed` permanently `0`: **no eviction is ever allowed, and
+every node drain blocks forever.** AKS retries rather than forcing, emitting
+`Eviction blocked by Too Many Requests (usually a pdb): shared-1` — 67 times over
+7 minutes in a controlled reproduction. Setting `enablePDB: false` unblocked the
+stuck deletion immediately.
+
+Nothing real is given up. A PDB exists to stop Kubernetes evicting the primary
+while a replica catches up; with one instance there is no replica, so the
+guarantee was already vacuous — it blocked drains without protecting anything.
+Postgres still shuts down gracefully (`terminationGracePeriodSeconds: 1800`),
+which is what AKS waits for. Upstream CNPG documents `enablePDB: false` as
+advisable for non-production clusters.
+
+**`instances: 2` is the alternative fix, not a complement.** It also makes the
+PDB satisfiable, and adds real availability — at the cost of a second attached
+disk (one of ~6 remaining) and 1Gi more reserved memory. Measured on the test
+cluster: actual usage was ~8m CPU and 217Mi per instance, so the cost is the disk
+slot rather than compute. Revisit when the node count or the availability
+requirement grows.
+
+**This decision depends on [entry 15](#15-the-node-pool-is-pinned-to-one-availability-zone).** Automatic upgrades are only
+survivable because the pool is pinned to one zone; a replacement node in another
+zone strands every disk-bound workload permanently, and no PDB setting helps.
+
+**Dex keeps its signing keys, so an upgrade no longer logs everyone out.** With
+the previous `storage: type: memory`, every Dex restart generated a new signing
+key and **invalidated every issued token** — and the resulting `401` was
+indistinguishable from a broken authenticator, which produced two wrong
+diagnoses. `storage: type: kubernetes` persists the keys as custom resources in
+etcd. Verified on the test cluster: the JWKS `kid` was identical across a full
+`rollout restart`.
+
+It costs **no PVC and no attached disk** — the store is etcd, reached through the
+API server. The chart already shipped the ServiceAccount, the ClusterRole
+(`create` on `customresourcedefinitions`) and the namespace Role
+(`dex.coreos.com/*`); those permissions were simply unused. Dex creates its own
+ten CRDs at startup.
+
+**What it puts in etcd.** Refresh tokens become `refreshtokens.dex.coreos.com`
+objects in the `dex` namespace — real credentials in cluster state. Only the Dex
+ServiceAccount can read them; a project developer gets `no` (verified by
+impersonation), since project `admin` does not reach the `dex` namespace. It also
+makes a second Dex replica possible for the first time, because both would share
+auth-code state — not done here, but no longer blocked.
+
+**When a `401` still happens**, compare the token's `kid` against Dex's live JWKS
+before suspecting anything else ([maintenance.md](maintenance.md)). Keys now
+survive restarts, but a token older than a key *rotation* still fails, and that
+check distinguishes it from a real fault in seconds.

@@ -75,13 +75,75 @@ Thanos, Headlamp.
 
 ## AKS upgrades
 
-- **Patches** (`1.36.x`): automatic via the `patch` upgrade channel + NodeImage
-  channel in `infra/aks.bicep`. Nothing to do.
+- **Patches** (`1.36.x`) and **node images**: automatic, via the `patch` and
+  `NodeImage` channels in `infra/aks.bicep`. Nothing to do — deliberately, see
+  below.
 - **Minors** (`1.36 → 1.37`): manual. Bump `kubernetesVersion` in
   `infra/aks.bicep` + the param files, `az deployment group create` (or
   `az aks upgrade`). Do it before AKS drops support for the running minor
   (check `az aks get-versions -l <region>`). On a single-node cluster the
   upgrade is briefly disruptive — expect a short control-plane/node blip.
+
+**Scaling down is the dangerous direction.** The pool is pinned to one
+availability zone (`zones: ['1']`, [decisions.md](decisions.md) entry 15) exactly
+so this is safe — Azure disks cannot cross zones, and before the pin a
+replacement node could land in a zone with none of the cluster's data. If the
+pool is ever spread across zones again, check where the disks are before removing
+a node:
+
+```bash
+kubectl get pv -o custom-columns='CLAIM:.spec.claimRef.name,\
+ZONE:.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values'
+kubectl get nodes -L topology.kubernetes.io/zone
+```
+
+A pod whose disk is in a zone with no node stays `Pending` **permanently** with
+*"node(s) didn't match PersistentVolume's node affinity"* — it does not resolve
+on its own, and the fix is to add a node back in that zone.
+
+**Why node images stay on a channel.** An automatic node-image upgrade will
+replace the node, which is disruptive, and on 2026-08-24 it left the test
+cluster's pool in `provisioningState: Failed` with two nodes billing instead of
+one. Running upgrades by hand was considered and **rejected**: the platform is
+maintained by volunteers, node images ship roughly weekly with OS CVE fixes, and
+a manual step that gets forgotten is worse than an automatic one that
+occasionally disrupts. The fix is to make the disruption survivable, not to move
+it into a runbook nobody runs.
+
+Three things make it survivable, all now in place:
+
+- **One availability zone** ([decisions.md](decisions.md) entry 15) — so a
+  replacement node can always reattach the cluster's disks. Without it the
+  replacement landed in another zone and six workloads were stranded
+  permanently.
+- **`enablePDB: false` on the shared Postgres** — CNPG's PDB protects the
+  primary by role, so with `instances: 1` it is *never* satisfiable and blocks
+  every drain forever. AKS retries rather than forcing: the event is
+  `Eviction blocked by Too Many Requests (usually a pdb): shared-1`, seen 67
+  times over 7 minutes. Removing the PDB unblocked it immediately.
+
+- **Dex keeps its signing keys across restarts** (`storage: type: kubernetes`).
+  Previously an upgrade restarted Dex, rotated its key and logged **everyone**
+  out; the resulting `401` looked exactly like a broken authenticator and caused
+  two wrong diagnoses. Keys now persist as custom resources in etcd — no PVC.
+
+**If SSO fails, check the token's key id first.** It takes seconds and rules out
+the most common cause:
+
+```bash
+curl -s https://dex.$HOST/keys | grep -o '"kid":"[^"]*"'
+```
+
+Compare with the `kid` in the token's JWT header. A mismatch means the token
+predates a key rotation — log in again, nothing is wrong. Only if they **match**
+and the API server still returns `401` is there a real fault to chase
+([decisions.md](decisions.md) entry 16).
+
+**Verifying after an upgrade.** Node images are checked with:
+
+```bash
+az aks nodepool get-upgrades -g $RG --cluster-name $CLUSTER -n <pool>
+```
 
 **A minor upgrade leaves Pod Security behind.** Project namespaces pin
 `pod-security.kubernetes.io/enforce-version` (see
