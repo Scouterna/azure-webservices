@@ -495,6 +495,7 @@ false-alarm. Left open rather than guessed.
 **ArgoCD was not being scraped at all** — it ships metrics Services and no
 ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
 rule has a target before trusting it (install.md §11).
+
 ## 12. GitOps is ArgoCD, not Flux
 
 **Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
