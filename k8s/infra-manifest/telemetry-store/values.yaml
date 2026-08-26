@@ -1,0 +1,50 @@
+# The telemetry store — in-cluster S3-compatible object storage, backing Loki
+# (logs) and Thanos (long-term metrics). Named for its role, not its software:
+# it runs MinIO, but "MinIO" is reserved for a possible future project-facing
+# object store. docs/decisions.md entry 17.
+# Backups do NOT land here — Velero and CNPG write to the durable external
+# Azure Blob account.
+#
+# Standalone mode (single replica) — fits the budget/single-node cluster.
+# The PVC size is deliberately a Standard SSD tier boundary (E4 = 32 GiB):
+# Azure rounds any in-between size UP to the next tier and bills for it, so
+# always request an exact tier (4/8/16/32/64/128/256... GiB).
+mode: standalone
+replicas: 1
+
+# Without this the chart names every resource <release>-minio. The Service DNS
+# name is load-bearing (Loki, Thanos and the bucket Job all address it).
+fullnameOverride: telemetry-store
+
+persistence:
+  enabled: true
+  storageClass: disk-standardssd
+  size: 32Gi          # E4 tier — do not use non-tier sizes
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+# Root credentials come from a pre-created Secret, materialized from Key Vault
+# by ESO (k8s/infra-manifest/external-secrets/telemetry-store-secrets.yaml).
+existingSecret: telemetry-store-root
+
+# Buckets (loki, thanos) are created by the separate `telemetry-store-buckets`
+# ArgoCD app (k8s/infra-manifest/telemetry-store-buckets/), NOT the chart's
+# built-in `buckets:` provisioning. The chart does it via a Helm post-install
+# hook, which ArgoCD maps to a PostSync hook that is skipped when the store
+# can't sync cleanly on first bring-up (before its ESO secret exists) — so the
+# buckets never appear and Thanos-store crash-loops. The standalone Job is
+# reliable and idempotent.
+
+# No ingress — accessed in-cluster only. This is infrastructure storage, not a
+# service projects consume.
+
+# NOTE: the chart's own metrics.serviceMonitor is NOT used. Its template requires
+# `includeNode` as well as `enabled`, and hardcodes `release: {{ .Release.Name }}`
+# (= telemetry-store), which our Prometheus ignores (it selects release=kps). The
+# monitor is a plain manifest instead:
+# k8s/infra-manifest/telemetry-store/servicemonitor.yaml

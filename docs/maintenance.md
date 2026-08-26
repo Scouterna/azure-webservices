@@ -200,20 +200,20 @@ retention). Per volume:
 | PVC | Size | If lost |
 |---|---|---|
 | `postgres/shared-1` | 32Gi | **Own CNPG backup at 02:30** — the real protection; Velero is secondary |
-| `minio/minio` | 32Gi | Backing store for Loki + Thanos. **Weekly is the only copy** — see below |
-| `monitoring/prometheus` | 32Gi | Recent metrics; long-term copies live in Thanos → MinIO |
-| `monitoring/loki` | 16Gi | Recent logs; chunks ship to MinIO |
+| `telemetry-store/telemetry-store` | 32Gi | Backing store for Loki + Thanos. **Weekly is the only copy** — see below |
+| `monitoring/prometheus` | 32Gi | Recent metrics; long-term copies live in Thanos → telemetry store |
+| `monitoring/loki` | 16Gi | Recent logs; chunks ship to the telemetry store |
 | `monitoring/grafana` | 8Gi | **Gap — see below** |
 | `monitoring/alertmanager` | 4Gi | Silences only; regenerate by hand |
 
 **Two accepted decisions, recorded rather than left implicit:**
 
-- **MinIO gets weekly cover only, and that is accepted.** It is single-node and
+- **The telemetry store gets weekly cover only, and that is accepted.** It is single-node and
   holds observability history that Prometheus and Loki have already flushed to
   it. Losing it between weekly backups loses up to a week of long-term metrics
   and logs — annoying, not operationally critical, and the alternative (daily
   snapshots of a 32Gi volume holding derived data) is not worth the storage.
-  Revisit if MinIO ever holds something that is *not* derived.
+  Revisit if it ever holds something that is *not* derived.
 - **Grafana is the real gap.** Dashboards are vendored in Git and provisioned,
   but **anything created through the UI lives only in this PVC**, with weekly as
   the only copy. A dashboard built on Monday and lost on Friday is gone. The
@@ -330,7 +330,8 @@ endpoint answers on the public internet.
 **This is the higher-value target of the two.** The vault is the cluster's root
 of trust — it holds the **Sealed Secrets private key** (which decrypts every
 `SealedSecret` committed to the public repo), the backup storage-account key,
-the Dex and Grafana GitHub client secrets, and the MinIO root credentials.
+the Dex and Grafana GitHub client secrets, and the telemetry store's root
+credentials.
 Compromise here is worse than compromise of the backup account.
 
 **What protects it.** Authorization is Azure **RBAC**, not legacy access

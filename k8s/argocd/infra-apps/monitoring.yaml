@@ -1,6 +1,7 @@
 # Wave 2 — monitoring: kube-prometheus-stack + Loki + Alloy in one Application
-# (multi-source). Needs MinIO buckets (Loki + the Prometheus Thanos sidecar both
-# use MinIO) and the seeded secrets (grafana-admin, loki-minio, thanos-objstore).
+# (multi-source). Needs the telemetry-store buckets (Loki + the Prometheus Thanos
+# sidecar both use the store) and the seeded secrets (grafana-admin,
+# loki-telemetry-store, thanos-objstore).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

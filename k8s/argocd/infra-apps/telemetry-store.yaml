@@ -1,11 +1,12 @@
-# Wave 1 — MinIO (object storage; backs Loki and Thanos only — Velero backs up to
-# Azure Blob, and this is not project storage). Needs a StorageClass (wave 0).
-# The minio-root secret is seeded out of band (bootstrap) or, on the real
-# cluster, via an ExternalSecret.
+# Wave 1 — the telemetry store (object storage backing Loki and Thanos only).
+# Runs MinIO, but is named for its role: the name "MinIO" is reserved for a
+# future project-facing object store. docs/decisions.md entry 17.
+# Velero backs up to Azure Blob, not here. Needs a StorageClass (wave 0).
+# The telemetry-store-root secret comes from Key Vault via ESO.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: minio
+  name: telemetry-store
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -15,22 +16,22 @@ spec:
   project: infra
   destination:
     server: https://kubernetes.default.svc
-    namespace: minio
+    namespace: telemetry-store
   sources:
     - repoURL: https://charts.min.io/
       chart: minio
       targetRevision: 5.4.0
       helm:
-        releaseName: minio
+        releaseName: telemetry-store
         valueFiles:
-          - $values/k8s/infra-manifest/minio/values.yaml
+          - $values/k8s/infra-manifest/telemetry-store/values.yaml
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
       ref: values
     # ServiceMonitor as a plain manifest — see values.yaml for why not the chart's.
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
-      path: k8s/infra-manifest/minio
+      path: k8s/infra-manifest/telemetry-store
       directory:
         include: 'servicemonitor.yaml'
   syncPolicy:

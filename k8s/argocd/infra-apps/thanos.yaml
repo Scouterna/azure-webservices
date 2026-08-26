@@ -1,4 +1,4 @@
-# Wave 3 — Thanos (long-term / HA metrics). Reads the MinIO `thanos` bucket via
+# Wave 3 — Thanos (long-term / HA metrics). Reads the telemetry store's `thanos` bucket via
 # the thanos-objstore secret; federates the Prometheus sidecar (wave 2). Uses the
 # stevehipwell chart (upstream quay.io/thanos images — the Bitnami chart is dead).
 apiVersion: argoproj.io/v1alpha1

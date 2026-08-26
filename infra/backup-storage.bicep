@@ -3,7 +3,7 @@
 //
 // Deployed to the SEPARATE, long-lived resource group (webservices-infra),
 // NOT the cluster RG — so backups survive cluster teardown/loss. This breaks
-// the circular dependency of backing up to the in-cluster MinIO (single node).
+// the circular dependency of backing up to the in-cluster telemetry store (single node).
 // Velero writes namespace/state backups here; CloudNativePG can also target it
 // for Postgres Barman backups.
 //

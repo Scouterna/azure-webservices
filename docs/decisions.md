@@ -26,7 +26,7 @@ say why rather than deleting it.
 | [14](#14-projects-read-their-own-argocd-status-via-kubernetes-rbac-not-an-argocd-ui) | Projects read their own ArgoCD status via RBAC, not an ArgoCD UI | current |
 | [15](#15-the-node-pool-is-pinned-to-one-availability-zone) | The node pool is pinned to one availability zone | current |
 | [16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb) | Node-image upgrades stay automatic; the shared Postgres has no PDB | current |
-| [17](#17-minio-backs-observability-it-is-not-general-purpose-storage) | MinIO backs observability; it is not general-purpose storage | current |
+| [17](#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved) | The telemetry store is named for its job, and "MinIO" is reserved | current |
 | [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
 
 ---
@@ -307,7 +307,7 @@ months rather than minutes.
 object from the request in object format" — and a `Level` column whose values
 include `RequestResponse`. This category records `create`, `update` and `patch`,
 which are exactly the verbs External Secrets uses to materialise a Secret. If AKS
-populates those columns for `secrets`, then the Sealed Secrets private key, MinIO's
+populates those columns for `secrets`, then the Sealed Secrets private key, the telemetry store's
 root credentials and every project's PostgreSQL password are in this workspace in
 plaintext — base64 is an encoding, not encryption — and read access to it is
 equivalent to read access to every secret in the cluster.
@@ -646,7 +646,7 @@ whatever zone its pod first landed in, which is right at creation time and
 useless once that node is gone.
 
 **Found the hard way, 2026-08-24.** A node-image upgrade replaced the single
-zone-1 node with a zone-2 node. All six existing disks (MinIO, Loki, Grafana,
+zone-1 node with a zone-2 node. All six existing disks (telemetry store, Loki, Grafana,
 Prometheus, Alertmanager, the Postgres primary) stayed pinned to zone 1, and
 their pods sat `Pending` with *"node(s) didn't match PersistentVolume's node
 affinity"* until a second node was added back in zone 1. **Scaling *up* is safe;
@@ -747,18 +747,30 @@ before suspecting anything else ([maintenance.md](maintenance.md)). Keys now
 survive restarts, but a token older than a key *rotation* still fails, and that
 check distinguishes it from a real fault in seconds.
 
-## 17. MinIO backs observability; it is not general-purpose storage
+## 17. The telemetry store is named for its job, and "MinIO" is reserved
 
-**Current.** MinIO exists to give Loki and Thanos the S3-compatible API they
-require, and holds only the `loki` and `thanos` buckets. It is not offered to
-projects. The [README](../README.md) states this and
-[maintenance.md](maintenance.md) records the backup posture that follows from it;
-this entry records only *why*, because people read "there is MinIO in the
-cluster" as "there is S3 storage I can use" and the conclusion alone did not
-prevent that.
+**Current.** The `telemetry-store` namespace holds an object store that exists to
+give Loki and Thanos the S3-compatible API they require, and holds only the `loki`
+and `thanos` buckets. It is not offered to projects.
 
-**The reason is the backup assumption, not the disk space.** Everything in MinIO
-today is *derived* — metrics and logs Prometheus and Loki have already flushed.
+**It runs MinIO, but it is not called MinIO — and that is the point.** People read
+"there is MinIO in the cluster" as "there is S3 storage I can use", because a
+product name advertises a capability while saying nothing about who may use it.
+Stating the scope next to the name did not prevent the misreading: the name is
+read, the sentence after it is skimmed. So the service is named for its *job*
+instead, and the name **MinIO is deliberately kept free** for a project-facing
+object store, should one ever be built — see *Revisit when* below.
+The software is still MinIO and the charts, images and upstream labels still say
+so; what changed is that the platform no longer *offers* something called MinIO
+that nobody may use.
+
+Avoid `objectstore` as a name: CNPG already has an `ObjectStore` kind in this
+cluster (`shared-store` in `postgres`), and reusing the word would collide with
+something that exists.
+
+**The reason it is closed to projects is the backup assumption, not the disk
+space.** Everything in the store today is *derived* — metrics and logs Prometheus
+and Loki have already flushed.
 That is what justifies excluding the namespace from the daily Velero schedule.
 Project state is not derived, so putting it there would make an accepted risk
 wrong **without anything reporting that it had changed** — and the failure mode
@@ -767,27 +779,20 @@ not Barman (Postgres only).
 
 Two further blockers, either of which would need solving first: there is no
 per-project credential (the install writes a single root user/password to Key
-Vault), and MinIO is a single replica on one PVC that Loki, Thanos and the backup
-flow all already depend on.
+Vault), and the store is a single replica on one PVC that Loki, Thanos and the
+backup flow all already depend on.
 
 **Revisit when** a project genuinely needs object-storage semantics — an S3 SDK,
 blobs, versioning — rather than somewhere to keep a few KB. That is two pieces of
-work, not one: per-project credentials **and** a backup story MinIO does not have
-today. The trap is building it *because MinIO is already installed*; that
+work, not one: per-project credentials **and** a backup story this store does not
+have today. The trap is building it *because MinIO is already installed*; that
 reasoning is what would put project data on the observability volume. A second,
-separate instance is the honest answer, not converting this one.
-
-**Give that instance its own name — not "the other MinIO".** The misreading this
-entry exists to prevent came from the *product* name being visible while its
-scope was not, so two things called MinIO would reproduce it exactly. `minio`
-stays the observability store; the project-facing one should be named for what it
-offers. Avoid `objectstore`: CNPG already has an `ObjectStore` kind in this
-cluster (`shared-store` in `postgres`), and reusing the word would collide with
-something that exists.
+separate instance is the honest answer, not converting this one — **and it is the
+one that gets to be called `minio`**, which is why that name is kept free.
 
 **What building it would take**, so this does not need investigating again. The
-deployment itself is the easy half — copy the shape of `minio.yaml` and
-`k8s/infra-manifest/minio/`, which is one Application, a values file and a
+deployment itself is the easy half — copy the shape of `telemetry-store.yaml` and
+`k8s/infra-manifest/telemetry-store/`, which is one Application, a values file and a
 bucket-creation Job. Sizing follows the disk-tier rule: an exact E-tier PVC on
 `disk-standardssd`, and it **costs one of the ~6 remaining attached disks**
 unless it is put on `files-shared` instead. Two traps are already solved in the
@@ -807,13 +812,13 @@ The work that does **not** exist yet, and is the real cost:
   same opt-in discipline the Key Vault store uses.
 - **Deciding the backup posture deliberately.** The daily Velero schedule is
   `includedNamespaces: "*"` **minus an exclusion list**, so a new namespace is
-  backed up by default — the opposite of the `minio` namespace's situation, which
+  backed up by default — the opposite of the `telemetry-store` namespace's situation, which
   is excluded by name. That default is right here, but it must be a decision
   rather than an accident, and PVC snapshots of project blobs are not free.
-- **An ingress, if projects need presigned URLs or browser uploads.** MinIO is
+- **An ingress, if projects need presigned URLs or browser uploads.** The store is
   in-cluster only today (no ingress by choice). Adding one is a Traefik
   IngressRoute plus a certificate, and it makes the store publicly reachable —
-  which is a different security question from anything MinIO answers today.
+  which is a different security question from anything the store answers today.
 
 **The strongest argument for building it is the billing model, not the API.**
 Its cost is the PVC underneath it — fixed, and paid once by the platform. S3
@@ -926,7 +931,7 @@ and nothing else.
 `files-shared` row above is the answer. A project-facing S3 store would be a
 narrower tier than that one, not an extra option beside it — only right when an
 application genuinely speaks S3 rather than wanting somewhere to keep files.
-[Entry 17](#17-minio-backs-observability-it-is-not-general-purpose-storage)
+[Entry 17](#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved)
 records what standing one up would cost.
 
 See [onboarding.md](onboarding.md) for the recipes.
