@@ -307,10 +307,10 @@ months rather than minutes.
 object from the request in object format" — and a `Level` column whose values
 include `RequestResponse`. This category records `create`, `update` and `patch`,
 which are exactly the verbs External Secrets uses to materialise a Secret. If AKS
-populates those columns for `secrets`, then the Sealed Secrets private key, the telemetry store's
-root credentials and every project's PostgreSQL password are in this workspace in
-plaintext — base64 is an encoding, not encryption — and read access to it is
-equivalent to read access to every secret in the cluster.
+populates those columns for `secrets`, then the Sealed Secrets private key, the
+telemetry store's root credentials and every project's PostgreSQL password are in
+this workspace in plaintext — base64 is an encoding, not encryption — and read
+access to it is equivalent to read access to every secret in the cluster.
 
 **Whether it actually does is unverified**, and deliberately recorded as open
 rather than assumed either way. The columns and the audit level are documented;
@@ -646,9 +646,9 @@ whatever zone its pod first landed in, which is right at creation time and
 useless once that node is gone.
 
 **Found the hard way, 2026-08-24.** A node-image upgrade replaced the single
-zone-1 node with a zone-2 node. All six existing disks (telemetry store, Loki, Grafana,
-Prometheus, Alertmanager, the Postgres primary) stayed pinned to zone 1, and
-their pods sat `Pending` with *"node(s) didn't match PersistentVolume's node
+zone-1 node with a zone-2 node. All six existing disks (telemetry store, Loki,
+Grafana, Prometheus, Alertmanager, the Postgres primary) stayed pinned to zone 1,
+and their pods sat `Pending` with *"node(s) didn't match PersistentVolume's node
 affinity"* until a second node was added back in zone 1. **Scaling *up* is safe;
 scaling *down* is destructive**, because Azure chooses which node to remove and
 it may be the one whose zone holds the data.
@@ -759,10 +759,10 @@ right to: naming a service after its software is an offer of that software.
 Stating the scope next to the name did not prevent the misreading: the name is
 read, the sentence after it is skimmed. So the service is named for its *job*
 instead, and the name **MinIO is deliberately kept free** for a project-facing
-object store, should one ever be built — see *Revisit when* below.
-The software is still MinIO and the charts, images and upstream labels still say
-so; what changed is that the platform no longer *offers* something called MinIO
-that nobody may use.
+object store, to be built when a project first needs one — see *Revisit when*
+below. The software is still MinIO and the charts, images and upstream labels
+still say so; what changed is that the platform no longer *offers* something
+called MinIO that nobody may use.
 
 **A project-facing object store will simply be called `minio`** — the same way the
 shared database is called PostgreSQL rather than something abstract. A product
@@ -816,9 +816,10 @@ The work that does **not** exist yet, and is the real cost:
   same opt-in discipline the Key Vault store uses.
 - **Deciding the backup posture deliberately.** The daily Velero schedule is
   `includedNamespaces: "*"` **minus an exclusion list**, so a new namespace is
-  backed up by default — the opposite of the `telemetry-store` namespace's situation, which
-  is excluded by name. That default is right here, but it must be a decision
-  rather than an accident, and PVC snapshots of project blobs are not free.
+  backed up by default — the opposite of the `telemetry-store` namespace's
+  situation, which is excluded by name. That default is right here, but it must
+  be a decision rather than an accident, and PVC snapshots of project blobs are
+  not free.
 - **An ingress, if projects need presigned URLs or browser uploads.** The store is
   in-cluster only today (no ingress by choice). Adding one is a Traefik
   IngressRoute plus a certificate, and it makes the store publicly reachable —

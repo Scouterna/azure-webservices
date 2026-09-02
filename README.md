@@ -61,11 +61,9 @@ no default-deny baseline yet — is in [docs/security.md](docs/security.md), wit
 reasoning behind each choice in [docs/decisions.md](docs/decisions.md).
 
 Storage is in-cluster and portable: a **telemetry store** for Loki and Thanos, and
-**CloudNativePG** for PostgreSQL — no Azure data PaaS. The telemetry store is
-infrastructure, **not** storage projects can use: it is a single replica on one
-volume, holding only data those two can rebuild, which is why it is backed up
-weekly rather than daily. It runs MinIO, but is named for its job — the name
-"MinIO" is reserved for a project-facing object store if one is ever built
+**CloudNativePG** for PostgreSQL — no Azure data PaaS. The telemetry store runs
+MinIO, but is named for its job. "MinIO" is reserved for a project-facing
+object store still to be built
 ([decisions.md entry 17](docs/decisions.md#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved)).
 A project needing persistent state uses the shared PostgreSQL, a shared
 filesystem, or a PersistentVolumeClaim — see

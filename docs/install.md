@@ -428,9 +428,10 @@ and the Sealed Secrets `sealed-secrets-key` (a `kubernetes.io/tls` Secret labell
 > **How the ordering works (no hand-seeding):** sync-waves are arranged so secrets
 > exist before the things that use them. The ESO operator is wave 0; the
 > `ClusterSecretStore` + `ExternalSecret`s (the `external-secrets-config` app) are
-> wave 1, alongside the telemetry store and ahead of wave-2 monitoring. If a consumer starts a
-> moment before its secret is materialized it crash-loops and **self-heals** the
-> instant ESO reconciles the value. A rebuild recreates every secret from the Key Vault.
+> wave 1, alongside the telemetry store and ahead of wave-2 monitoring. If a
+> consumer starts a moment before its secret is materialized it crash-loops and
+> **self-heals** the instant ESO reconciles the value. A rebuild recreates every
+> secret from the Key Vault.
 
 > **Why infra secrets stay on KV/ESO (not Sealed Secrets):** the cluster also runs
 > Sealed Secrets (the self-service, commit-safe path for *projects*), so it's fair
@@ -442,12 +443,13 @@ and the Sealed Secrets `sealed-secrets-key` (a `kubernetes.io/tls` Secret labell
 > these secrets are consumed in waves 1–2; the sealed-secrets controller is itself
 > wave 2, so a sealed infra secret would gain a longer, more fragile dependency
 > chain than reading straight from KV. **(3) Value handling** — the random secrets
-> (`telemetry-store-*`, `grafana-admin-password`) are generated with `openssl rand` directly
-> into KV and no human ever sees the plaintext; the GitHub client secrets are
-> external values you must custody centrally and rotate. Sealing either would mean
-> handling the raw plaintext locally at `kubeseal` time — a downgrade. So: **infra
-> secrets → KV/ESO** (early, durable, controller-independent); **project secrets →
-> Sealed Secrets or KV/ESO**, the project's choice (see onboarding.md "Secrets").
+> (`telemetry-store-*`, `grafana-admin-password`) are generated with
+> `openssl rand` directly into KV and no human ever sees the plaintext; the GitHub
+> client secrets are external values you must custody centrally and rotate.
+> Sealing either would mean handling the raw plaintext locally at `kubeseal`
+> time — a downgrade. So: **infra secrets → KV/ESO** (early, durable,
+> controller-independent); **project secrets → Sealed Secrets or KV/ESO**, the
+> project's choice (see onboarding.md "Secrets").
 
 ---
 

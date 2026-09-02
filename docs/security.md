@@ -7,10 +7,10 @@ Key Vault, and what the three controls that do it deliberately do *not* cover.
 
 A project developer holds ClusterRole `admin` in their own namespaces. That
 bounds what they can **address** — it does not, on its own, bound what they can
-**reach**. The cluster is single-node, so the node runs ArgoCD, External
-Secrets, the Sealed Secrets private key, the telemetry store's root credentials and the shared
-PostgreSQL alongside every project. A workload that gets to the node gets to all
-of it.
+**reach**. The cluster is single-node, so the node runs ArgoCD, External Secrets,
+the Sealed Secrets private key, the telemetry store's root credentials and the
+shared PostgreSQL alongside every project. A workload that gets to the node gets
+to all of it.
 
 Three paths led out of a namespace: two to the node (§1, §2, which close each
 other's gap and neither of which is sufficient alone), and one straight to the
@@ -109,9 +109,9 @@ Workload Identity, holding `Key Vault Secrets User` across the whole vault. An
 `ExternalSecret` names a key; ESO fetches it and writes a Secret into the
 `ExternalSecret`'s namespace. So whoever can create an `ExternalSecret` can read
 **any** secret in the vault, into a namespace they control — the Sealed Secrets
-private key (which decrypts every `SealedSecret` in this public repo), the telemetry store's
-root credentials, the backup storage-account key, the Dex and Grafana OAuth
-client secrets, and every other project's PostgreSQL password.
+private key (which decrypts every `SealedSecret` in this public repo), the
+telemetry store's root credentials, the backup storage-account key, the Dex and
+Grafana OAuth client secrets, and every other project's PostgreSQL password.
 
 Two independent things had to be true for that to be reachable from a project
 namespace, and both were:

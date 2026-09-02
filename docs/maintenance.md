@@ -208,12 +208,12 @@ retention). Per volume:
 
 **Two accepted decisions, recorded rather than left implicit:**
 
-- **The telemetry store gets weekly cover only, and that is accepted.** It is single-node and
-  holds observability history that Prometheus and Loki have already flushed to
-  it. Losing it between weekly backups loses up to a week of long-term metrics
-  and logs — annoying, not operationally critical, and the alternative (daily
-  snapshots of a 32Gi volume holding derived data) is not worth the storage.
-  Revisit if it ever holds something that is *not* derived.
+- **The telemetry store gets weekly cover only, and that is accepted.** It is
+  single-node and holds observability history that Prometheus and Loki have
+  already flushed to it. Losing it between weekly backups loses up to a week of
+  long-term metrics and logs — annoying, not operationally critical, and the
+  alternative (daily snapshots of a 32Gi volume holding derived data) is not
+  worth the storage. Revisit if it ever holds something that is *not* derived.
 - **Grafana is the real gap.** Dashboards are vendored in Git and provisioned,
   but **anything created through the UI lives only in this PVC**, with weekly as
   the only copy. A dashboard built on Monday and lost on Friday is gone. The

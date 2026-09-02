@@ -1,7 +1,7 @@
 # The telemetry store — in-cluster S3-compatible object storage, backing Loki
 # (logs) and Thanos (long-term metrics). Named for its role, not its software:
-# it runs MinIO, but "MinIO" is reserved for a possible future project-facing
-# object store. docs/decisions.md entry 17.
+# it runs MinIO, but "MinIO" is reserved for a future project-facing object
+# store. docs/decisions.md entry 17.
 # Backups do NOT land here — Velero and CNPG write to the durable external
 # Azure Blob account.
 #
