@@ -105,7 +105,7 @@ grafana:
       jsonData:
         maxLines: 1000
     # Thanos Query — long-term / HA metrics (federates the live Prometheus
-    # sidecar + the MinIO-backed store gateway). Prometheus-compatible API on
+    # sidecar + the object-backed store gateway). Prometheus-compatible API on
     # the thanos-query service (HTTP port 10902).
     - name: Thanos
       uid: thanos
@@ -119,7 +119,7 @@ prometheus:
   prometheusSpec:
     retention: 15d
     retentionSize: 12GB
-    # Thanos sidecar: uploads Prometheus TSDB blocks to the MinIO `thanos`
+    # Thanos sidecar: uploads Prometheus TSDB blocks to the telemetry store's `thanos`
     # bucket (config in the thanos-objstore secret) for long-term/HA metrics.
     # Thanos Query/Store/Compactor read the same bucket.
     thanos:

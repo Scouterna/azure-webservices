@@ -767,8 +767,9 @@ platform's own components already hold half the node's budget
 | Files, a few MB to GB | a `files-shared` PVC | **no** |
 | High-IOPS block storage | a `disk-*` PVC | **yes — ask infra first** |
 
-MinIO is not on this list. It backs Loki and Thanos and is not offered to
-projects; [decisions.md](decisions.md) entry 17 says why.
+Object storage is not on this list. The cluster's `telemetry-store` backs Loki and
+Thanos and is not offered to projects; [decisions.md](decisions.md) entry 17 says
+why, and what a project-facing object store would take to build.
 
 > **Tell us how often it is written, not just how big it is.** The cluster is
 > paid centrally, so your storage choice does not appear on your own budget — but

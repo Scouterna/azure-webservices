@@ -49,8 +49,8 @@ Secret.
 |---|---|---|
 | **-1** | `argocd-projects` | The AppProjects themselves. Every other Application names one, and an Application whose project does not exist cannot sync. |
 | **0** | `cluster-infra`, `cert-manager`, `external-secrets`, `gateway-api-crds` | Things others build on: StorageClasses, ClusterIssuers, and the CRDs plus admission webhooks that later waves reference. External Secrets is deliberately a full wave ahead of anything using an `ExternalSecret` kind. |
-| **1** | `traefik`, `minio`, `minio-buckets`, `external-secrets-config`, `cloudnative-pg`, `barman-cloud-plugin`, `sealed-secrets-key` | Needs wave 0. MinIO needs a StorageClass; `external-secrets-config` needs the operator's CRDs to exist before its `ClusterSecretStore` will validate. |
-| **2** | `monitoring`, `postgres`, `dex`, `sealed-secrets` | Needs wave 1. Monitoring needs the MinIO buckets (Loki chunks and the Prometheus Thanos sidecar) and the Secrets that `external-secrets-config` materialised. |
+| **1** | `traefik`, `telemetry-store`, `telemetry-store-buckets`, `external-secrets-config`, `cloudnative-pg`, `barman-cloud-plugin`, `sealed-secrets-key` | Needs wave 0. The telemetry store needs a StorageClass; `external-secrets-config` needs the operator's CRDs to exist before its `ClusterSecretStore` will validate. |
+| **2** | `monitoring`, `postgres`, `dex`, `sealed-secrets` | Needs wave 1. Monitoring needs the telemetry-store buckets (Loki chunks and the Prometheus Thanos sidecar) and the Secrets that `external-secrets-config` materialised. |
 | **3** | `headlamp`, `thanos`, `postgres-databases` | Needs wave 2. Headlamp needs Dex to authenticate against; Thanos needs Prometheus writing blocks; the databases need the server. |
 | **4** | `velero`, `dashboards`, `governance` | Needs everything else. `governance` carries the alerting rules, which need the monitoring stack from wave 2 to exist before they mean anything. |
 

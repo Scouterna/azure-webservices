@@ -1,4 +1,4 @@
-# Scrape MinIO. Written by hand rather than via the chart's
+# Scrape the telemetry store. Written by hand rather than via the chart's
 # metrics.serviceMonitor: that template also requires `includeNode`, and hardcodes
 # `release: <release name>`, which our Prometheus (selector release=kps) ignores.
 #
@@ -7,15 +7,17 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: minio
-  namespace: minio
+  name: telemetry-store
+  namespace: telemetry-store
   labels:
     release: kps
 spec:
   selector:
     matchLabels:
+      # The chart hardcodes app=minio on its Services regardless of
+      # fullnameOverride, so this selector keeps the upstream label.
       app: minio
-      # Excludes the minio-console Service, which carries app=minio but serves
+      # Excludes the console Service, which also carries app=minio but serves
       # HTML on 9001 — scraping it fails with "unsupported Content-Type text/html".
       monitoring: "true"
   endpoints:

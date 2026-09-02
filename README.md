@@ -43,7 +43,7 @@ ArgoCD**, so the whole platform can be torn down and rebuilt from this repo.
    |  namespaces  |                 |    services     |  group, managed by
    +--------------+                 +-----------------+  ArgoCD
 
-   common services:  Traefik . cert-manager . MinIO (observability store) .
+   common services:  Traefik . cert-manager . telemetry store (Loki/Thanos) .
    kube-prometheus-stack (Prometheus/Grafana/Alertmanager) . Loki (logs) .
    Thanos (long-term metrics) . External Secrets Operator (Key Vault) .
    CloudNativePG (PostgreSQL) . Headlamp (web UI)
@@ -60,12 +60,13 @@ Pod Security on project namespaces, API-server audit logs shipped off-cluster, a
 no default-deny baseline yet — is in [docs/security.md](docs/security.md), with the
 reasoning behind each choice in [docs/decisions.md](docs/decisions.md).
 
-Storage is in-cluster and portable: **MinIO** for S3-compatible object storage
-and **CloudNativePG** for PostgreSQL — no Azure data PaaS. MinIO exists to back
-**Loki and Thanos** and is deliberately **not** general-purpose storage for
-projects: it is a single replica on one volume, holding only data those two can
-rebuild, which is why it is backed up weekly rather than daily. A project needing
-persistent state uses the shared PostgreSQL or a PersistentVolumeClaim — see
+Storage is in-cluster and portable: a **telemetry store** for Loki and Thanos, and
+**CloudNativePG** for PostgreSQL — no Azure data PaaS. The telemetry store runs
+MinIO, but is named for its job. "MinIO" is reserved for a project-facing
+object store still to be built
+([decisions.md entry 17](docs/decisions.md#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved)).
+A project needing persistent state uses the shared PostgreSQL, a shared
+filesystem, or a PersistentVolumeClaim — see
 [onboarding.md](docs/onboarding.md).
 
 Persistent volumes use a cheap StandardSSD StorageClass by default; a Premium
@@ -78,13 +79,13 @@ class is available for workloads that opt in.
 | **cluster-infra** | StorageClasses, cert-manager ClusterIssuers, cluster-wide NetworkPolicy | raw manifests |
 | **cert-manager** | TLS certificates (Let's Encrypt) | `cert-manager` v1.21.0 |
 | **Traefik** | Ingress controller (default class) + LoadBalancer | `traefik` 41.0.2 |
-| **MinIO** | S3-compatible object storage, backing Loki + Thanos (not for projects) | `minio` 5.4.0 |
+| **telemetry store** | Object storage backing Loki + Thanos (runs MinIO; not for projects) | `minio` 5.4.0 |
 | **CloudNativePG** | PostgreSQL operator + the shared PostgreSQL server | `cloudnative-pg` 0.29.0 |
 | **External Secrets** | Sync secrets from Azure Key Vault (Workload Identity) | `external-secrets` 2.8.0 |
 | **Sealed Secrets** | Commit-safe secrets projects can self-serve | `sealed-secrets` 2.19.1 |
 | **monitoring** | Prometheus + Grafana + Alertmanager | `kube-prometheus-stack` 87.19.2 |
 | **Loki + Alloy** | Log aggregation and collection | `loki` 18.5.4, `alloy` 1.11.0 |
-| **Thanos** | Long-term / HA metrics (MinIO-backed) | `thanos` 1.24.0 |
+| **Thanos** | Long-term / HA metrics (telemetry-store-backed) | `thanos` 1.24.0 |
 | **Dex** | GitHub SSO for Headlamp and `kubectl` | `dex` 0.24.1 |
 | **Headlamp** | Kubernetes web UI (GitHub SSO via Dex) | raw manifests, image `v0.41.0` |
 | **Velero** | Namespace + PVC backups to Azure Blob | `velero` 12.1.0 |
@@ -207,7 +208,7 @@ touchpoints are few and isolated:
 | Secrets backend (Key Vault) | External Secrets `ClusterSecretStore` | Swap the store (Vault/AWS/GCP); `ExternalSecret`s unchanged |
 | Audit logs + alerting | `infra/loganalytics.bicep`, `infra/alerts.bicep`, the diagnostic setting in `aks.bicep` | No portable equivalent — the API-server audit feed is the provider's. Re-point at the new platform's log sink |
 
-In-cluster MinIO + CloudNativePG mean **no Azure data PaaS**. The residual Azure
+In-cluster object storage + CloudNativePG mean **no Azure data PaaS**. The residual Azure
 surface is the `infra/` Bicep layer (the cluster plus four standalone durable
 resources), one StorageClass string, a couple of LB annotations, and one
 secret-store object. Everything under `k8s/` moves unchanged.

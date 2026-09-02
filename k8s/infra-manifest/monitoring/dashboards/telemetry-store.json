@@ -3786,6 +3786,7 @@
   "refresh": "",
   "schemaVersion": 39,
   "tags": [
+    "telemetry-store",
     "minio"
   ],
   "templating": {
@@ -3861,7 +3862,7 @@
     ]
   },
   "timezone": "",
-  "title": "MinIO Dashboard",
+  "title": "Telemetry store (MinIO)",
   "uid": "TgmJnqnnk",
   "version": 1,
   "weekStart": ""

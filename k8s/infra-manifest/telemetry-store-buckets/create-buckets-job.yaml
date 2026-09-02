@@ -1,22 +1,22 @@
-# Creates the buckets the platform needs in MinIO: loki, thanos.
-# (Velero does NOT back up to MinIO — it writes to the durable external Azure
-# Blob account, precisely so backups survive the cluster.)
+# Creates the buckets the platform needs in the telemetry store: loki, thanos.
+# (Velero does NOT back up here — it writes to the durable external Azure Blob
+# account, precisely so backups survive the cluster.)
 #
 # Why a standalone Job instead of the min.io chart's built-in bucket creation:
 # the chart provisions buckets via a Helm `post-install` hook, which ArgoCD maps
-# to a PostSync hook. That only runs after the MinIO app syncs cleanly — and on a
-# fresh bring-up MinIO can't fully sync until its `minio-root` secret exists (ESO
-# materializes it), so the hook is skipped and the buckets are never created.
-# Thanos-store then crash-loops on "bucket does not exist". This Job makes bucket
-# creation a first-class, ArgoCD-tracked, idempotent resource instead.
+# to a PostSync hook. That only runs after the app syncs cleanly — and on a fresh
+# bring-up the store can't fully sync until its `telemetry-store-root` secret
+# exists (ESO materializes it), so the hook is skipped and the buckets are never
+# created. Thanos-store then crash-loops on "bucket does not exist". This Job
+# makes bucket creation a first-class, ArgoCD-tracked, idempotent resource.
 #
 # Idempotent: `mc mb --ignore-existing` is a no-op if the bucket already exists,
 # so it's safe to re-run on every sync / rebuild.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: minio-create-buckets
-  namespace: minio
+  name: telemetry-store-create-buckets
+  namespace: telemetry-store
 spec:
   # ArgoCD manages this as a normal resource (not a hook). The completed Job is
   # left in place — ArgoCD reads Job "Complete" as Healthy and stays Synced, no
@@ -26,32 +26,33 @@ spec:
   backoffLimit: 10
   template:
     metadata:
-      name: minio-create-buckets
+      name: telemetry-store-create-buckets
     spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
           image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
           env:
-            - name: MINIO_ROOT_USER
+            - name: STORE_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: minio-root
+                  name: telemetry-store-root
                   key: rootUser
-            - name: MINIO_ROOT_PASSWORD
+            - name: STORE_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: minio-root
+                  name: telemetry-store-root
                   key: rootPassword
           command:
             - /bin/sh
             - -c
             - |
               set -e
-              # Wait for MinIO to answer before creating buckets.
-              until mc alias set local http://minio.minio.svc.cluster.local:9000 \
-                    "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
-                echo "waiting for MinIO..."; sleep 3
+              # Wait for the store to answer before creating buckets.
+              until mc alias set local \
+                    http://telemetry-store.telemetry-store.svc.cluster.local:9000 \
+                    "$STORE_ROOT_USER" "$STORE_ROOT_PASSWORD" >/dev/null 2>&1; do
+                echo "waiting for telemetry-store..."; sleep 3
               done
               for b in loki thanos; do
                 mc mb --ignore-existing "local/$b"

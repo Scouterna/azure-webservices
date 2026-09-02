@@ -1,6 +1,6 @@
 # Thanos — long-term + HA metrics on top of Prometheus.
 # Uses the upstream quay.io/thanos/thanos image (via the stevehipwell chart).
-# Reads the MinIO `thanos` bucket — the same bucket the Prometheus Thanos
+# Reads the telemetry store's `thanos` bucket — the same bucket the Prometheus Thanos
 # sidecar uploads TSDB blocks to (objstore config in the thanos-objstore secret).
 
 # Point every component at the existing thanos-objstore secret (created out of
@@ -30,7 +30,7 @@ queryFrontend:
 
 # Store gateway: serves historical blocks from object storage.
 # persistence off (chart default): the volume is only a local index cache — the
-# blocks themselves live in the MinIO bucket. A restart re-downloads the cache,
+# blocks themselves live in the store bucket. A restart re-downloads the cache,
 # costing slower first queries, not data. Azure caps attachable disks per node
 # (12 on D4s_v6) and that limit, not CPU, is what this cluster runs out of first.
 storeGateway:
@@ -47,7 +47,7 @@ storeGateway:
 compact:
   enabled: true
   # Thanos defaults to retention 0 = keep every raw block FOREVER; unbounded,
-  # it eventually forces MinIO PVC tier bumps. The chart has no retention
+  # it eventually forces telemetry-store PVC tier bumps. The chart has no retention
   # values, so the flags go in raw.
   extraArgs:
     - --retention.resolution-raw=30d

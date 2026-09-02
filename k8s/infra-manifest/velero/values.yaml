@@ -1,5 +1,5 @@
 # Velero — cluster/namespace backups to EXTERNAL Azure Blob (durable,
-# decoupled from the in-cluster MinIO). Authenticates via Workload Identity
+# decoupled from the in-cluster telemetry store). Authenticates via Workload Identity
 # (the velero ServiceAccount federates to a managed identity) — no keys.
 #
 # The managed identity needs TWO roles on the storage account:

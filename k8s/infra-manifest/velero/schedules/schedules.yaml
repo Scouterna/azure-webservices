@@ -21,7 +21,7 @@ spec:
       - argocd
       - cert-manager
       - traefik
-      - minio
+      - telemetry-store
       - monitoring
       - cnpg-system
       - external-secrets

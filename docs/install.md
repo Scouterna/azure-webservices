@@ -382,8 +382,8 @@ sleep 20
 
 az keyvault secret list --vault-name $KEY_VAULT_NAME --query "[].name" -o tsv   # what already exists (durable vault)
 
-az keyvault secret set --vault-name $KEY_VAULT_NAME --name minio-root-user             --value admin
-az keyvault secret set --vault-name $KEY_VAULT_NAME --name minio-root-password         --value "$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+az keyvault secret set --vault-name $KEY_VAULT_NAME --name telemetry-store-root-user     --value admin
+az keyvault secret set --vault-name $KEY_VAULT_NAME --name telemetry-store-root-password --value "$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name grafana-admin-password      --value "$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name grafana-github-client-secret --value "$GRAFANA_GITHUB_CLIENT_SECRET"
 
@@ -418,7 +418,8 @@ fi
 ```
 
 The `ExternalSecret`s then produce the in-cluster secrets consumers expect:
-`minio-root`, `loki-minio`, `thanos-objstore` (composed from the MinIO values),
+`telemetry-store-root`, `loki-telemetry-store`, `thanos-objstore` (composed from
+the telemetry-store values),
 `grafana-admin`, `grafana-github-oauth`, `dex-oauth` (Dex's GitHub + Headlamp
 client secrets), `headlamp-oidc` (the same Headlamp secret, in its own namespace),
 and the Sealed Secrets `sealed-secrets-key` (a `kubernetes.io/tls` Secret labelled
@@ -427,9 +428,10 @@ and the Sealed Secrets `sealed-secrets-key` (a `kubernetes.io/tls` Secret labell
 > **How the ordering works (no hand-seeding):** sync-waves are arranged so secrets
 > exist before the things that use them. The ESO operator is wave 0; the
 > `ClusterSecretStore` + `ExternalSecret`s (the `external-secrets-config` app) are
-> wave 1, alongside MinIO and ahead of wave-2 monitoring. If a consumer starts a
-> moment before its secret is materialized it crash-loops and **self-heals** the
-> instant ESO reconciles the value. A rebuild recreates every secret from the Key Vault.
+> wave 1, alongside the telemetry store and ahead of wave-2 monitoring. If a
+> consumer starts a moment before its secret is materialized it crash-loops and
+> **self-heals** the instant ESO reconciles the value. A rebuild recreates every
+> secret from the Key Vault.
 
 > **Why infra secrets stay on KV/ESO (not Sealed Secrets):** the cluster also runs
 > Sealed Secrets (the self-service, commit-safe path for *projects*), so it's fair
@@ -441,12 +443,13 @@ and the Sealed Secrets `sealed-secrets-key` (a `kubernetes.io/tls` Secret labell
 > these secrets are consumed in waves 1–2; the sealed-secrets controller is itself
 > wave 2, so a sealed infra secret would gain a longer, more fragile dependency
 > chain than reading straight from KV. **(3) Value handling** — the random secrets
-> (`minio-*`, `grafana-admin-password`) are generated with `openssl rand` directly
-> into KV and no human ever sees the plaintext; the GitHub client secrets are
-> external values you must custody centrally and rotate. Sealing either would mean
-> handling the raw plaintext locally at `kubeseal` time — a downgrade. So: **infra
-> secrets → KV/ESO** (early, durable, controller-independent); **project secrets →
-> Sealed Secrets or KV/ESO**, the project's choice (see onboarding.md "Secrets").
+> (`telemetry-store-*`, `grafana-admin-password`) are generated with
+> `openssl rand` directly into KV and no human ever sees the plaintext; the GitHub
+> client secrets are external values you must custody centrally and rotate.
+> Sealing either would mean handling the raw plaintext locally at `kubeseal`
+> time — a downgrade. So: **infra secrets → KV/ESO** (early, durable,
+> controller-independent); **project secrets → Sealed Secrets or KV/ESO**, the
+> project's choice (see onboarding.md "Secrets").
 
 ---
 
@@ -880,7 +883,7 @@ The root app brings up every common service in dependency order:
 |---|---|
 | -1 | argocd-projects (adopts the AppProjects applied above, so later edits are a commit) |
 | 0 | cluster-infra (StorageClasses + ClusterIssuers), cert-manager, external-secrets (ESO operator), gateway-api-crds |
-| 1 | traefik, minio, minio-buckets, cloudnative-pg, external-secrets-config (ClusterSecretStore + ExternalSecrets), barman-cloud-plugin, sealed-secrets-key (durable sealing key ExternalSecret) |
+| 1 | traefik, telemetry-store, telemetry-store-buckets, cloudnative-pg, external-secrets-config (ClusterSecretStore + ExternalSecrets), barman-cloud-plugin, sealed-secrets-key (durable sealing key ExternalSecret) |
 | 2 | monitoring (kube-prometheus-stack + Loki + Alloy), dex, sealed-secrets (controller — after its key), postgres (the shared PostgreSQL server) |
 | 3 | thanos, headlamp, postgres-databases (per-project databases on the shared server) |
 | 4 | governance (alerts + dashboard), velero |

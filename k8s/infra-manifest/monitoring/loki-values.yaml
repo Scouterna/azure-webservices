@@ -1,10 +1,10 @@
 deploymentMode: SingleBinary
 
 loki:
-  # Chunks + index live in the in-cluster MinIO `loki` bucket (S3 API).
-  # MinIO requires path-style addressing (s3forcepathstyle) and its own endpoint.
-  # Credentials come from env vars sourced from the `minio-root` secret (see
-  # extraEnv below) — referenced here with ${VAR} interpolation.
+  # Chunks + index live in the in-cluster telemetry store's `loki` bucket (S3 API).
+  # The store requires path-style addressing (s3forcepathstyle) and its own endpoint.
+  # Credentials come from env vars sourced from the `loki-telemetry-store` secret
+  # (see extraEnv below) — referenced here with ${VAR} interpolation.
   storage:
     type: s3
     bucketNames:
@@ -12,12 +12,12 @@ loki:
       ruler: loki
       admin: loki
     s3:
-      endpoint: http://minio.minio.svc.cluster.local:9000
-      region: us-east-1            # arbitrary; MinIO ignores it but the client requires one
-      accessKeyId: ${MINIO_ACCESS_KEY_ID}
-      secretAccessKey: ${MINIO_SECRET_ACCESS_KEY}
+      endpoint: http://telemetry-store.telemetry-store.svc.cluster.local:9000
+      region: us-east-1            # arbitrary; the store ignores it but the client requires one
+      accessKeyId: ${STORE_ACCESS_KEY_ID}
+      secretAccessKey: ${STORE_SECRET_ACCESS_KEY}
       s3ForcePathStyle: true
-      insecure: true               # in-cluster HTTP to MinIO (no TLS on the internal endpoint)
+      insecure: true               # in-cluster HTTP (no TLS on the internal endpoint)
   schemaConfig:
     configs:
       - from: "2026-04-24"
@@ -30,7 +30,7 @@ loki:
   commonConfig:
     replication_factor: 1
   auth_enabled: false
-  # Loki defaults to retention DISABLED — chunks accumulate in MinIO forever.
+  # Loki defaults to retention DISABLED — chunks accumulate in the store forever.
   # The compactor enforces retention_period; delete requests go through s3.
   compactor:
     retention_enabled: true
@@ -48,23 +48,23 @@ loki:
 singleBinary:
   replicas: 1
   # Interpolate ${VAR} in the config from env (for the S3 creds), and inject the
-  # MinIO credentials from the loki-minio secret. These belong under
+  # store credentials from the loki-telemetry-store secret. These belong under
   # singleBinary (the single-binary pod), not the top-level loki: block.
   extraArgs:
     - -config.expand-env=true
   extraEnv:
-    - name: MINIO_ACCESS_KEY_ID
+    - name: STORE_ACCESS_KEY_ID
       valueFrom:
         secretKeyRef:
-          name: loki-minio
+          name: loki-telemetry-store
           key: accessKey
-    - name: MINIO_SECRET_ACCESS_KEY
+    - name: STORE_SECRET_ACCESS_KEY
       valueFrom:
         secretKeyRef:
-          name: loki-minio
+          name: loki-telemetry-store
           key: secretKey
   # Small PVC still needed for the single-binary WAL / tsdb-shipper working dir;
-  # chunks + index now live in MinIO, so this stays modest. 16Gi = E3 tier.
+  # chunks + index now live in the store, so this stays modest. 16Gi = E3 tier.
   persistence:
     enabled: true
     size: 16Gi
@@ -99,7 +99,7 @@ monitoring:
 
 # TOP-LEVEL in chart 18.x (not under monitoring:, where it is silently ignored
 # and the canary DaemonSet deploys anyway). Alloy already ships logs; the
-# write-path probe would push synthetic log lines into MinIO around the clock.
+# write-path probe would push synthetic log lines into the store around the clock.
 lokiCanary:
   enabled: false
 
