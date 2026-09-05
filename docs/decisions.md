@@ -28,6 +28,7 @@ say why rather than deleting it.
 | [16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb) | Node-image upgrades stay automatic; the shared Postgres has no PDB | current |
 | [17](#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved) | The telemetry store is named for its job, and "MinIO" is reserved | current |
 | [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
+| [19](#19-metric-retention-is-sized-from-a-measured-rate-and-0-is-not-unlimited) | Metric retention is sized from a measured rate, and `0` is not unlimited | current |
 
 ---
 
@@ -940,3 +941,71 @@ application genuinely speaks S3 rather than wanting somewhere to keep files.
 records what standing one up would cost.
 
 See [onboarding.md](onboarding.md) for the recipes.
+
+## 19. Metric retention is sized from a measured rate, and `0` is not unlimited
+
+**Current.** Thanos keeps raw blocks 10 days, 5-minute downsamples 90 days and
+1-hour downsamples 180 days. The telemetry store's PVC is 64Gi (E6). The
+`weekly-full` Velero schedule keeps backups 90 days.
+
+**The numbers come from a measurement, not a guess.** Taken from the live J26
+cluster on 2026-09-05 — a single-node AKS cluster running the same
+Prometheus/Loki stack:
+
+| | Measured |
+|---|---|
+| Active series | 109 165 |
+| Prometheus TSDB on disk | 14.8 GiB |
+| Covering | 16 days |
+| **Rate** | **≈0.93 GiB/day** |
+
+At that rate the previous settings did not fit. Raw retention of 30 days is
+~28 GiB on its own, against a 32Gi bucket that must also hold the 5m tier, the
+1h tier and Loki's chunks. **A full bucket stops accepting writes, and metric
+ingestion then stops silently** — so the sizing has to be deliberate rather than
+optimistic.
+
+**Treat 0.93 GiB/day as a floor.** It was measured after the event, with the
+cluster quiet; during the camp it was certainly higher. Re-measure before a
+large event rather than trusting this row.
+
+**Raw resolution is the expensive tier and the least useful one.** Cutting it
+from 30d to 10d frees ~18 GiB. What survives a late discovery is the 5-minute
+tier, which is why that one keeps the full 90 days.
+
+### The trap this entry exists to prevent
+
+`0` means opposite things in the two halves of this stack:
+
+| Setting | `0` means |
+|---|---|
+| Prometheus `retention.time` | use the default — **15 days** |
+| Prometheus `retention.size` | unlimited |
+| Thanos `--retention.resolution-*` | keep forever |
+
+"0 means unlimited" is right for two of these and destructive for the third —
+and the first two sit in the same config block, one line apart.
+
+**This is not hypothetical.** On the J26 cluster `retention.time=0d` was set
+intending "keep everything". It resolved to the 15-day default, and because it
+was applied 15 days after the camp ended, every metric from the event was
+deleted. The disk was 24% full: nothing ran out, and nothing alerted. The loss
+was found a month later, by which point the data was long gone.
+
+**Why this cluster would have survived it.** Prometheus retention governs only
+the local window here — the Thanos sidecar has already uploaded the blocks to
+object storage, and the compactor's retention is a separate setting that the
+change would not have touched. A month after the event the 5-minute tier would
+still have held the whole camp.
+
+### Retention is not an archive
+
+The longest tier is 180 days. A project whose metrics must outlive that needs a
+deliberate export when the project ends. **Do not solve it by raising
+retention**: the tiers are sized to the bucket, and an unbounded tier fills it
+and stops ingestion for every project on the cluster.
+
+**Backups are sized to discovery latency, not to RPO.** `weekly-full` went from
+35 to 90 days because the loss of an infra PVC is typically noticed weeks after
+it happens, and a 35-day window can expire before anyone looks. The J26 loss was
+found after a month — inside 90 days, outside 35.

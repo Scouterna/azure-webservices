@@ -906,7 +906,7 @@ needed.** Velero runs two schedules (`k8s/infra-manifest/velero/schedules/`):
 | Schedule | What | When | Retention |
 |---|---|---|---|
 | `daily-projects` | every project namespace (all except infra ns), **incl. PVC data** | 02:00 daily | 14 days |
-| `weekly-full` | the whole cluster (all namespaces) as a safety net | 03:00 Sundays | 35 days |
+| `weekly-full` | the whole cluster (all namespaces) as a safety net | 03:00 Sundays | 90 days |
 
 So a project asking "please back up my PVC" already has it: their namespace and
 its persistent volumes are captured daily. Backups go to the `velero` container

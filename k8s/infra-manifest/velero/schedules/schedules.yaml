@@ -34,7 +34,8 @@ spec:
     snapshotVolumes: true
     storageLocation: default
 ---
-# Weekly full-cluster backup (all namespaces incl. infra) — safety net. 5 weeks.
+# Weekly full-cluster backup (all namespaces incl. infra) — safety net.
+# 90 days: infra PVC loss is often noticed weeks later. docs/decisions.md entry 19.
 apiVersion: velero.io/v1
 kind: Schedule
 metadata:
@@ -43,7 +44,7 @@ metadata:
 spec:
   schedule: "0 3 * * 0" # 03:00 Sundays
   template:
-    ttl: 840h # 35 days
+    ttl: 2160h # 90 days
     includedNamespaces:
       - "*"
     snapshotVolumes: true

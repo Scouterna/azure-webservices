@@ -6,9 +6,10 @@
 # Azure Blob account.
 #
 # Standalone mode (single replica) — fits the budget/single-node cluster.
-# The PVC size is deliberately a Standard SSD tier boundary (E4 = 32 GiB):
+# The PVC size is deliberately a Standard SSD tier boundary (E6 = 64 GiB):
 # Azure rounds any in-between size UP to the next tier and bills for it, so
 # always request an exact tier (4/8/16/32/64/128/256... GiB).
+# Sized from measured J26 rates — docs/decisions.md entry 19.
 mode: standalone
 replicas: 1
 
@@ -19,7 +20,7 @@ fullnameOverride: telemetry-store
 persistence:
   enabled: true
   storageClass: disk-standardssd
-  size: 32Gi          # E4 tier — do not use non-tier sizes
+  size: 64Gi          # E6 tier — do not use non-tier sizes
 
 resources:
   requests:

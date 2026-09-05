@@ -117,6 +117,8 @@ grafana:
 
 prometheus:
   prometheusSpec:
+    # Local window only — long-term copies live in Thanos. NEVER set retention to
+    # 0: here that means the 15d default, not "forever". docs/decisions.md entry 19.
     retention: 15d
     retentionSize: 12GB
     # Thanos sidecar: uploads Prometheus TSDB blocks to the telemetry store's `thanos`
