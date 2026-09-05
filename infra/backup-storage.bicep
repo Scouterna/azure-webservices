@@ -44,7 +44,10 @@ resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
   location: location
   tags: tags
   sku: {
-    name: 'Standard_ZRS' // zone-redundant (survives a zone/datacenter failure). Standard_LRS is cheaper; GRS for regional DR.
+    // Zone-redundant in-region AND geo-replicated, with read access to the
+    // secondary. NOT Standard_GRS: its primary is LRS, so it trades zone
+    // redundancy for geo rather than adding it. docs/maintenance.md.
+    name: 'Standard_RAGZRS'
   }
   kind: 'StorageV2'
   properties: {
@@ -98,6 +101,18 @@ resource cnpgSharedContainer 'Microsoft.Storage/storageAccounts/blobServices/con
   name: cnpgSharedContainerName
   properties: {
     publicAccess: 'None'
+  }
+}
+
+// CanNotDelete, not ReadOnly: ReadOnly would block `az storage account keys
+// list`, which install.md needs for the CNPG Barman key. Declared here (not an
+// imperative doc step) so a rebuild cannot skip it.
+resource storageLock 'Microsoft.Authorization/locks@2020-05-01' = {
+  scope: storage
+  name: 'no-delete'
+  properties: {
+    level: 'CanNotDelete'
+    notes: 'Holds all cluster backups. Remove the lock deliberately before any intended deletion.'
   }
 }
 

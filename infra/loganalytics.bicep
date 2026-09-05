@@ -62,6 +62,17 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
+// Holds the API-server audit log — the only record of who did what, and it
+// cannot be reconstructed. docs/decisions.md entry 9.
+resource workspaceLock 'Microsoft.Authorization/locks@2020-05-01' = {
+  scope: workspace
+  name: 'no-delete'
+  properties: {
+    level: 'CanNotDelete'
+    notes: 'Remove the lock deliberately before any intended deletion.'
+  }
+}
+
 @description('ARM resource ID — this is what a diagnostic setting targets.')
 output workspaceId string = workspace.id
 
