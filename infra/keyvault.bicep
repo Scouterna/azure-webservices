@@ -58,8 +58,9 @@ resource vault 'Microsoft.KeyVault/vaults@2024-11-01' = {
   }
 }
 
-// The cluster's root of trust — see docs/security.md. Soft-delete and purge
-// protection cover the secrets; this covers the vault itself.
+// The cluster's root of trust — see docs/maintenance.md ("Accepted risks"), as
+// the header above. Soft-delete and purge protection cover the secrets; this
+// covers the vault itself.
 resource vaultLock 'Microsoft.Authorization/locks@2020-05-01' = {
   scope: vault
   name: 'no-delete'
