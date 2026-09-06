@@ -751,6 +751,7 @@ Every placeholder is named for exactly one variable, so the rule is always
 | 3 | `k8s/infra-manifest/dex/values.yaml` | `<DEX_GITHUB_CLIENT_ID>` |
 | 4 | `k8s/argocd/infra-apps/velero.yaml` | `<VELERO_CLIENT_ID>`, `<BACKUP_STORAGE_ACCOUNT>`, `<SUBSCRIPTION_ID>` (**twice**), `<NODE_RESOURCE_GROUP>` |
 | 5 | `k8s/infra-manifest/external-secrets/clustersecretstore.yaml` | `<KEY_VAULT_NAME>` (inside `vaultUrl`) |
+| 6 | `k8s/infra-manifest/postgres/cluster.yaml` | `<BACKUP_STORAGE_ACCOUNT>` (**twice** — the ExternalSecret template and the ObjectStore `destinationPath`) |
 
 > The two GitHub client ids (rows 2 and 3) are **different values from different
 > OAuth apps** — mixing them up breaks that login. That is why neither is called
@@ -779,13 +780,14 @@ an unpushed edit has no effect. Push before applying the root app (§10), and ag
 whenever you change a filled-in value later:
 
 ```bash
-# Stage exactly the five files from the table above — never `git add -A`/`-u`,
+# Stage exactly the six files from the table above — never `git add -A`/`-u`,
 # which would sweep up anything else you happen to have modified.
 git add k8s/argocd/infra-apps/external-secrets.yaml \
         k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml \
         k8s/infra-manifest/dex/values.yaml \
         k8s/argocd/infra-apps/velero.yaml \
-        k8s/infra-manifest/external-secrets/clustersecretstore.yaml
+        k8s/infra-manifest/external-secrets/clustersecretstore.yaml \
+        k8s/infra-manifest/postgres/cluster.yaml
 
 git diff --cached          # review: only the placeholders you filled should appear
 git status --short         # anything still unstaged is intentionally left out

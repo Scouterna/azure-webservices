@@ -20,7 +20,7 @@ spec:
     name: backup-storage-key
     template:
       data:
-        AZURE_STORAGE_ACCOUNT: stwsv2backup
+        AZURE_STORAGE_ACCOUNT: <BACKUP_STORAGE_ACCOUNT>
         AZURE_STORAGE_KEY: "{{ .storageKey }}"
   data:
     - secretKey: storageKey
@@ -34,7 +34,12 @@ metadata:
   namespace: postgres
 spec:
   configuration:
-    destinationPath: "https://stwsv2backup.blob.core.windows.net/cnpg-shared"
+    destinationPath: "https://<BACKUP_STORAGE_ACCOUNT>.blob.core.windows.net/cnpg-shared"
+    # Barman stores under <destinationPath>/<serverName>/ and defaults
+    # serverName to the Cluster name. The backup account outlives the cluster,
+    # so a rebuild would write a NEW database into the OLD database's path.
+    # Bump this on every rebuild against a surviving account — docs/postgres.md.
+    serverName: shared-1
     azureCredentials:
       storageAccount:
         name: backup-storage-key
@@ -46,7 +51,9 @@ spec:
       compression: gzip
     data:
       compression: gzip
-  retentionPolicy: "30d"
+  # 90d, not 30d: sized to how late a problem is noticed, not to an RPO.
+  # Matches the weekly-full Velero TTL. docs/postgres.md.
+  retentionPolicy: "90d"
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
