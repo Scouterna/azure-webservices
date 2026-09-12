@@ -58,6 +58,15 @@ Not all bumps are equal. These carry a real risk of breaking changes:
   deleted by a sync — upgrades apply in place.
 - **cert-manager** — generally smooth, but CRD upgrades must be applied (the
   chart handles this with `crds.enabled: true`).
+- **Barman Cloud Plugin** — the **only** app that does not upgrade by bumping
+  `targetRevision`. Its manifest is vendored at
+  `k8s/infra-manifest/barman-cloud-plugin/manifest.yaml`, because the upstream
+  `kubernetes/` kustomize base ships **testing images on a moving tag** and no
+  path in that git tree yields release images. Upgrading means downloading the
+  new release asset over that file — the procedure, and the check that the new
+  file really carries release images, are in the README beside it. The file also
+  contains the `ObjectStore` CRD, so a bump can change the schema that
+  `k8s/infra-manifest/postgres/cluster.yaml` depends on.
 
 Slow/low-risk: MinIO, CloudNativePG (operator; watch the PG major it manages),
 Thanos, Headlamp.
