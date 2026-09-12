@@ -28,8 +28,50 @@ with `:v0.13.0`. ArgoCD cannot fetch a release-asset URL, and a kustomize
 `images:` override cannot fix the sidecar, because that one is a base64 value
 inside a `secretGenerator` literal rather than an image field.
 
-So the asset is vendored. Apart from those two image references the vendored
-file is identical to what the old path produced.
+So the asset is vendored. Compared resource-by-resource against what the old
+path produced, the **only substantive differences are those two image
+references**. Two further differences are mechanical consequences of them: the
+Secret carries a kustomize content-hash suffix
+(`plugin-barman-cloud-8tfddg42gf` -> `-m5m67kfh8f`), which moves because the
+sidecar image inside it changed, and the Deployment's `secretKeyRef.name`
+follows. Both manifests contain the same 17 resources, and every other resource
+is byte-identical.
+
+## Verifying the equivalence yourself
+
+The claim above is reproducible — it does not have to be taken on trust:
+
+```bash
+tmp=$(mktemp -d)
+git clone -q --depth 1 --branch v0.13.0 \
+  https://github.com/cloudnative-pg/plugin-barman-cloud.git "$tmp/src"
+kubectl kustomize "$tmp/src/kubernetes" > "$tmp/old.yaml"
+
+python3 - "$tmp/old.yaml" k8s/infra-manifest/barman-cloud-plugin/manifest.yaml <<'EOF'
+import sys, yaml, json
+def load(p):
+    out = {}
+    for d in yaml.safe_load_all(open(p)):
+        if d:
+            k, n = d["kind"], d["metadata"]["name"]
+            if k == "Secret":           # kustomize hash suffix moves with content
+                n = "plugin-barman-cloud-<hash>"
+            out[(k, n)] = d
+    return out
+old, new = load(sys.argv[1]), load(sys.argv[2])
+print("same resource set:", set(old) == set(new), f"({len(old)} resources)")
+for k in sorted(set(old) & set(new)):
+    a = json.dumps(old[k], sort_keys=True)
+    b = json.dumps(new[k], sort_keys=True)
+    if a != b:
+        print("differs:", k)
+EOF
+rm -rf "$tmp"
+```
+
+Expected: the same 17 resources, with only the `Deployment` and the `Secret`
+differing — and those only in the image references and the hash suffix that
+follows from them.
 
 ## Upgrading
 
@@ -41,15 +83,15 @@ file is identical to what the old path produced.
    ```
 2. Confirm it carries release images, not testing ones:
    ```bash
-   grep -E '^\s+image: ' k8s/infra-manifest/barman-cloud-plugin/manifest.yaml
+   grep -E '^[[:space:]]+image: ' k8s/infra-manifest/barman-cloud-plugin/manifest.yaml
    python3 -c "import yaml,base64;[print(base64.b64decode(d['data']['SIDECAR_IMAGE']).decode()) \
      for d in yaml.safe_load_all(open('k8s/infra-manifest/barman-cloud-plugin/manifest.yaml')) \
      if d and d.get('kind')=='Secret' and 'SIDECAR_IMAGE' in (d.get('data') or {})]"
    ```
    Neither may contain `-testing` or end in `:main`.
-3. Read the upstream changelog for CRD changes — `objectstores.barmancloud.cnpg.io`
-   is in this file, so a bump can change the `ObjectStore` schema that
-   `k8s/infra-manifest/postgres/cluster.yaml` depends on.
+3. Read the upstream changelog for CRD changes. The CRD
+   `objectstores.barmancloud.cnpg.io` is in this file, so a bump can change the
+   `ObjectStore` schema that `k8s/infra-manifest/postgres/cluster.yaml` uses.
 4. Commit both this file and any `ObjectStore` change together.
 
 ## Provenance
