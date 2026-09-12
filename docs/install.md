@@ -476,6 +476,16 @@ az deployment group create  -g $CLUSTER_RG -f infra/main.bicep -p infra/env/webs
 > `az aks show -n $CLUSTER` fails with "not found". A CLI `-p` takes precedence
 > over the same parameter in the `.bicepparam` file.
 
+> **A test cluster that runs alongside the real one overrides three params, not
+> one.** The param file also pins the audit workspace to the production durable
+> RG, so add:
+> ```
+> -p auditWorkspaceName=$AUDIT_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG
+> ```
+> with `$INFRA_RG` set to the test cluster's own durable RG. A test cluster
+> sharing the production durable resources collides with them — see
+> [decisions.md](decisions.md) entry 20.
+
 `$CLUSTER_RG` is the cluster's resource group, distinct from the durable
 `$INFRA_RG`. AKS also auto-creates a *node* resource group (named
 `MC_<cluster-rg>_<cluster>_<location>` by Azure) for the VMs/disks/LB; you don't
@@ -749,7 +759,7 @@ Every placeholder is named for exactly one variable, so the rule is always
 | 1 | `k8s/argocd/infra-apps/external-secrets.yaml` | `<ESO_CLIENT_ID>` |
 | 2 | `k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml` | `<GRAFANA_GITHUB_CLIENT_ID>` |
 | 3 | `k8s/infra-manifest/dex/values.yaml` | `<DEX_GITHUB_CLIENT_ID>` |
-| 4 | `k8s/argocd/infra-apps/velero.yaml` | `<VELERO_CLIENT_ID>`, `<BACKUP_STORAGE_ACCOUNT>`, `<SUBSCRIPTION_ID>` (**twice**), `<NODE_RESOURCE_GROUP>` |
+| 4 | `k8s/argocd/infra-apps/velero.yaml` | `<VELERO_CLIENT_ID>`, `<BACKUP_STORAGE_ACCOUNT>`, `<INFRA_RG>`, `<SUBSCRIPTION_ID>` (**twice**), `<NODE_RESOURCE_GROUP>` |
 | 5 | `k8s/infra-manifest/external-secrets/clustersecretstore.yaml` | `<KEY_VAULT_NAME>` (inside `vaultUrl`) |
 | 6 | `k8s/infra-manifest/postgres/cluster.yaml` | `<BACKUP_STORAGE_ACCOUNT>` (**twice** — the ExternalSecret template and the ObjectStore `destinationPath`) |
 

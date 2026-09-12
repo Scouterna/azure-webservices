@@ -31,7 +31,7 @@ spec:
           - name: configuration.backupStorageLocation[0].config.storageAccount
             value: <BACKUP_STORAGE_ACCOUNT>
           - name: configuration.backupStorageLocation[0].config.resourceGroup
-            value: webservices-infra
+            value: <INFRA_RG>
           - name: configuration.backupStorageLocation[0].config.subscriptionId
             value: <SUBSCRIPTION_ID>
           - name: configuration.volumeSnapshotLocation[0].config.resourceGroup

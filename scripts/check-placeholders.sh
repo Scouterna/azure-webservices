@@ -49,11 +49,12 @@ if [[ -n "$CACHED" && -n "$REF" ]]; then
 fi
 PATTERN='<[A-Z][A-Z0-9_]*>'
 
-# The eleven placeholders §9 fills, as "file:PLACEHOLDER". Kept explicit so that
+# The twelve placeholders §9 fills, as "file:PLACEHOLDER". Kept explicit so that
 # DELETING one is a failure too, not just replacing it with a real value.
 EXPECTED=$(cat <<'EOF'
 k8s/argocd/infra-apps/external-secrets.yaml:<ESO_CLIENT_ID>
 k8s/argocd/infra-apps/velero.yaml:<BACKUP_STORAGE_ACCOUNT>
+k8s/argocd/infra-apps/velero.yaml:<INFRA_RG>
 k8s/argocd/infra-apps/velero.yaml:<NODE_RESOURCE_GROUP>
 k8s/argocd/infra-apps/velero.yaml:<SUBSCRIPTION_ID>
 k8s/argocd/infra-apps/velero.yaml:<SUBSCRIPTION_ID>
@@ -151,7 +152,7 @@ fi
 found=$(printf '%s\n' "$scanned" | sed -n $'s/^PH\t//p' | sort)
 
 if diff <(printf '%s\n' "$EXPECTED" | sort) <(printf '%s\n' "$found") >/dev/null; then
-  echo "check-placeholders: template intact in ${SCOPE} (11 placeholders)."
+  echo "check-placeholders: template intact in ${SCOPE} (12 placeholders)."
   exit 0
 fi
 
