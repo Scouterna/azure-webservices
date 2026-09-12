@@ -46,13 +46,13 @@ storeGateway:
 # persistence off for the same reason — this volume is compaction scratch space.
 compact:
   enabled: true
-  # Thanos defaults to retention 0 = keep every raw block FOREVER; unbounded,
-  # it eventually forces telemetry-store PVC tier bumps. The chart has no retention
-  # values, so the flags go in raw.
+  # Thanos retention 0 = keep FOREVER (the opposite of Prometheus, where 0 means
+  # "use the default"). Tiers sized from measured J26 rates — docs/decisions.md
+  # entry 19. The chart has no retention values, so the flags go in raw.
   extraArgs:
-    - --retention.resolution-raw=30d
+    - --retention.resolution-raw=10d
     - --retention.resolution-5m=90d
-    - --retention.resolution-1h=1y
+    - --retention.resolution-1h=180d
   persistence:
     enabled: false
   resources:

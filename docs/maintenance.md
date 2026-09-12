@@ -169,7 +169,7 @@ cluster, so it survives a teardown):
 | Schedule | Scope | When | Retention |
 |---|---|---|---|
 | `daily-projects` | project namespaces (`"*"` minus infra), incl. PVC data | 02:00 daily | 14 days |
-| `weekly-full` | every namespace, infra included | 03:00 Sundays | 35 days |
+| `weekly-full` | every namespace, infra included | 03:00 Sundays | 90 days |
 
 **Why the split.** Project namespaces hold state that exists nowhere else, so
 they are backed up daily. Infra namespaces are reproducible from Git via ArgoCD —
@@ -193,14 +193,14 @@ snapshot its 32Gi PVC on a second, overlapping path. It is still covered by
 
 ### Infra volumes: what is actually protected
 
-"Infra is reproducible from Git" is true of the **manifests**, not of the ~124Gi
-of state in infra PVCs. Those are covered only by `weekly-full` (35-day
+"Infra is reproducible from Git" is true of the **manifests**, not of the ~156Gi
+of state in infra PVCs. Those are covered only by `weekly-full` (90-day
 retention). Per volume:
 
 | PVC | Size | If lost |
 |---|---|---|
 | `postgres/shared-1` | 32Gi | **Own CNPG backup at 02:30** — the real protection; Velero is secondary |
-| `telemetry-store/telemetry-store` | 32Gi | Backing store for Loki + Thanos. **Weekly is the only copy** — see below |
+| `telemetry-store/telemetry-store` | 64Gi | Backing store for Loki + Thanos. **Weekly is the only copy** — see below |
 | `monitoring/prometheus` | 32Gi | Recent metrics; long-term copies live in Thanos → telemetry store |
 | `monitoring/loki` | 16Gi | Recent logs; chunks ship to the telemetry store |
 | `monitoring/grafana` | 8Gi | **Gap — see below** |
@@ -212,7 +212,7 @@ retention). Per volume:
   single-node and holds observability history that Prometheus and Loki have
   already flushed to it. Losing it between weekly backups loses up to a week of
   long-term metrics and logs — annoying, not operationally critical, and the
-  alternative (daily snapshots of a 32Gi volume holding derived data) is not
+  alternative (daily snapshots of a 64Gi volume holding derived data) is not
   worth the storage. Revisit if it ever holds something that is *not* derived.
 - **Grafana is the real gap.** Dashboards are vendored in Git and provisioned,
   but **anything created through the UI lives only in this PVC**, with weekly as
