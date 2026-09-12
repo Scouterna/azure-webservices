@@ -96,7 +96,11 @@ fi
 # matches k8s yaml at EVERY depth — including direct children of k8s/, which
 # 'k8s/**/*.yaml' (requiring two path separators) silently missed.
 scan() {
+  # The vendored barman-cloud-plugin release manifest is upstream content, not
+  # one of this repo's templates. Its CRD carries a literal <KEY> in a field
+  # description, which would otherwise read as an unfilled placeholder.
   git grep -z -nI $CACHED -E "$PATTERN" ${REF:+"$REF"} -- 'k8s/*.yaml' 'k8s/*.yml' \
+    ':!k8s/infra-manifest/barman-cloud-plugin/manifest.yaml' \
   | awk -v RS='\n' -v strip="$strip" '
     {
       n = index($0, "\0"); if (n == 0) next
