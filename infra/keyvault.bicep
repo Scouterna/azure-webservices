@@ -58,6 +58,18 @@ resource vault 'Microsoft.KeyVault/vaults@2024-11-01' = {
   }
 }
 
+// The cluster's root of trust — see docs/maintenance.md ("Accepted risks"), as
+// the header above. Soft-delete and purge protection cover the secrets; this
+// covers the vault itself.
+resource vaultLock 'Microsoft.Authorization/locks@2020-05-01' = {
+  scope: vault
+  name: 'no-delete'
+  properties: {
+    level: 'CanNotDelete'
+    notes: 'Remove the lock deliberately before any intended deletion.'
+  }
+}
+
 @description('Key Vault resource ID.')
 output vaultId string = vault.id
 @description('Key Vault URI (https://<name>.vault.azure.net/) — used by ESO SecretStore.')

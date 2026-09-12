@@ -338,7 +338,9 @@ Compromise here is worse than compromise of the backup account.
 policies (`enableRbacAuthorization: true`), so reaching the endpoint grants
 nothing without a role assignment. Soft-delete is on with 90-day retention and
 purge protection is enabled, so secrets cannot be permanently destroyed by an
-attacker or a mistake. What the open endpoint exposes is the **authentication
+attacker or a mistake. A **`CanNotDelete` resource lock** covers the vault
+itself, which soft-delete does not: it makes deletion a deliberate two-step act
+rather than one command. What the open endpoint exposes is the **authentication
 surface** — credential probing and any future Azure-side auth flaw.
 
 **Why it is open.** The same constraint as the backup account: ESO reads the
@@ -382,6 +384,35 @@ needed. Admins also run `az storage` against it from arbitrary networks.
   host or VPN), or
 - `defaultAction: 'Deny'` with the AKS outbound IP pinned to a **static Public
   IP** so it survives rebuilds, plus the admin IPs.
+
+**What protects the account itself.** Two things, both declared in
+`infra/backup-storage.bicep` so a rebuild cannot skip them:
+
+- **A `CanNotDelete` resource lock.** Blob soft-delete (30 days) recovers a
+  deleted *backup*; it does nothing about a deleted *account*. The lock is
+  deliberately `CanNotDelete` and not `ReadOnly` — `ReadOnly` would block
+  `az storage account keys list`, which install.md needs for the CNPG Barman
+  key. Because a lock on any resource also blocks deleting its resource group,
+  this protects `$INFRA_RG` as a whole; the same lock is on the Key Vault and
+  the audit workspace. A resource lock was chosen over a resource-group lock so
+  that DNS record sets in the same group stay deletable.
+
+  A deliberate deletion means removing the lock first — the point is that it
+  cannot happen by accident or in a single command:
+
+  ```bash
+  az lock delete -n no-delete -g $INFRA_RG \
+    --resource $BACKUP_STORAGE_ACCOUNT --resource-type Microsoft.Storage/storageAccounts
+  ```
+
+- **`Standard_RAGZRS` redundancy.** Zone-redundant in the primary region *and*
+  geo-replicated, with read access to the secondary — so a regional Azure
+  failure does not take the backups with it, and they can be read during one
+  without waiting for a failover. **Not `Standard_GRS`:** its primary replica is
+  LRS, so moving `ZRS → GRS` would have *traded away* zone redundancy rather
+  than adding geo. Measured cost (Cool tier, Sweden Central): 0.01250 → 0.02250
+  USD/GB/month, about 1.8×, on an account holding backup metadata and Postgres
+  base backups rather than PVC contents.
 
 **The bigger lever is the key, not the firewall.** `allowSharedKeyAccess: true`
 exists only because the CNPG Barman plugin's Managed-Identity path is finicky
