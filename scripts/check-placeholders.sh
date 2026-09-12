@@ -49,7 +49,7 @@ if [[ -n "$CACHED" && -n "$REF" ]]; then
 fi
 PATTERN='<[A-Z][A-Z0-9_]*>'
 
-# The nine placeholders §9 fills, as "file:PLACEHOLDER". Kept explicit so that
+# The eleven placeholders §9 fills, as "file:PLACEHOLDER". Kept explicit so that
 # DELETING one is a failure too, not just replacing it with a real value.
 EXPECTED=$(cat <<'EOF'
 k8s/argocd/infra-apps/external-secrets.yaml:<ESO_CLIENT_ID>
@@ -61,6 +61,8 @@ k8s/argocd/infra-apps/velero.yaml:<VELERO_CLIENT_ID>
 k8s/infra-manifest/dex/values.yaml:<DEX_GITHUB_CLIENT_ID>
 k8s/infra-manifest/external-secrets/clustersecretstore.yaml:<KEY_VAULT_NAME>
 k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<GRAFANA_GITHUB_CLIENT_ID>
+k8s/infra-manifest/postgres/cluster.yaml:<BACKUP_STORAGE_ACCOUNT>
+k8s/infra-manifest/postgres/cluster.yaml:<BACKUP_STORAGE_ACCOUNT>
 EOF
 )
 
@@ -145,7 +147,7 @@ fi
 found=$(printf '%s\n' "$scanned" | sed -n $'s/^PH\t//p' | sort)
 
 if diff <(printf '%s\n' "$EXPECTED" | sort) <(printf '%s\n' "$found") >/dev/null; then
-  echo "check-placeholders: template intact in ${SCOPE} (9 placeholders)."
+  echo "check-placeholders: template intact in ${SCOPE} (11 placeholders)."
   exit 0
 fi
 
