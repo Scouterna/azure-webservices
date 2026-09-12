@@ -322,8 +322,10 @@ az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
   --query '{name:name, retention:retentionInDays, capGb:workspaceCapping.dailyQuotaGb, ingestion:workspaceCapping.dataIngestionStatus}' -o table
 ```
 
-If you overrode `$INFRA_RG`, add `-p auditWorkspaceResourceGroup=$INFRA_RG` to the
-§7a deployment alongside the existing `-p clusterName=$CLUSTER`.
+If you overrode `$INFRA_RG` **or** `$LOG_WORKSPACE`, add
+`-p auditWorkspaceName=$LOG_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG` to
+the §7a deployment alongside the existing `-p clusterName=$CLUSTER`. A test
+cluster with its own durable resources overrides both.
 
 > **It is capped at 1 GB/day, and the cap loses data.** Ingestion stops for the
 > rest of the UTC day once hit — that protects the budget and is the right default
@@ -476,15 +478,16 @@ az deployment group create  -g $CLUSTER_RG -f infra/main.bicep -p infra/env/webs
 > `az aks show -n $CLUSTER` fails with "not found". A CLI `-p` takes precedence
 > over the same parameter in the `.bicepparam` file.
 
-> **A test cluster that runs alongside the real one overrides three params, not
-> one.** The param file also pins the audit workspace to the production durable
-> RG, so add:
+> **A test cluster with its own durable resources overrides three params, not
+> one.** The param file pins the audit workspace to the production name *and*
+> resource group, so override both alongside `clusterName`:
 > ```
-> -p auditWorkspaceName=$AUDIT_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG
+> -p auditWorkspaceName=$LOG_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG
 > ```
-> with `$INFRA_RG` set to the test cluster's own durable RG. A test cluster
-> sharing the production durable resources collides with them — see
-> [decisions.md](decisions.md) entry 20.
+> §5b asserts these two against the bicepparam and prints `MISMATCH` if they
+> disagree — that assertion is what catches a forgotten override. Why a test
+> cluster gets its own durable resources at all: [decisions.md](decisions.md)
+> entry 20.
 
 `$CLUSTER_RG` is the cluster's resource group, distinct from the durable
 `$INFRA_RG`. AKS also auto-creates a *node* resource group (named
@@ -746,6 +749,7 @@ echo "GRAFANA_GITHUB_CLIENT_ID=$GRAFANA_GITHUB_CLIENT_ID"
 echo "DEX_GITHUB_CLIENT_ID=$DEX_GITHUB_CLIENT_ID"
 echo "VELERO_CLIENT_ID=$VELERO_CLIENT_ID"
 echo "BACKUP_STORAGE_ACCOUNT=$BACKUP_STORAGE_ACCOUNT"
+echo "INFRA_RG=$INFRA_RG"
 echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
 echo "NODE_RESOURCE_GROUP=$NODE_RESOURCE_GROUP"
 echo "KEY_VAULT_NAME=$KEY_VAULT_NAME"
