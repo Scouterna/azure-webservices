@@ -1037,12 +1037,24 @@ Sharing the vault would also hand both clusters the **same Sealed Secrets privat
 key**, so a `SealedSecret` committed for one decrypts in the other.
 
 **Why separate resources rather than separate names.** Every durable value is
-already an install-time input — `$INFRA_RG`, `<KEY_VAULT_NAME>`,
-`<BACKUP_STORAGE_ACCOUNT>`, `<INFRA_RG>` — so pointing a test cluster at its own
-resources costs no code change, and the production install stays exactly as
-documented. The alternative, one vault with `-test` suffixed keys plus a Velero
-prefix plus a distinct `serverName`, is three separate patches, each of which a
-later operator can undo by writing to the wrong key.
+already an install-time input, in one of three forms:
+
+| Form | Values |
+|---|---|
+| Runbook variables (`install.md` §0) | `$INFRA_RG`, `$KEY_VAULT_NAME`, `$BACKUP_STORAGE_ACCOUNT`, `$LOG_WORKSPACE` |
+| Manifest placeholders, filled in §9 | `<KEY_VAULT_NAME>`, `<BACKUP_STORAGE_ACCOUNT>`, `<INFRA_RG>` |
+| Bicep params, overridden on the CLI | `auditWorkspaceName`, `auditWorkspaceResourceGroup` |
+
+The third row is the one that catches people: the audit workspace is pinned in
+`webservices.bicepparam`, not templated, so a test cluster must override both of
+its params alongside `clusterName` — which is why §7a says three, not one.
+
+Pointing a test cluster at its own resources therefore costs no code change, and
+the production install stays exactly as documented.
+
+**Rejected: one shared vault with `-test` suffixed keys.** That plus a Velero
+prefix plus a distinct `serverName` is three separate patches rather than one
+boundary, and each can be undone later by an operator writing to the wrong key.
 
 **Rejected: sharing the durable RG and being careful.** "Careful" is not a
 control. The failure mode is silent in all three cases — a backup that overwrites
