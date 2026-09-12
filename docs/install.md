@@ -322,8 +322,10 @@ az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
   --query '{name:name, retention:retentionInDays, capGb:workspaceCapping.dailyQuotaGb, ingestion:workspaceCapping.dataIngestionStatus}' -o table
 ```
 
-If you overrode `$INFRA_RG`, add `-p auditWorkspaceResourceGroup=$INFRA_RG` to the
-§7a deployment alongside the existing `-p clusterName=$CLUSTER`.
+If you overrode `$INFRA_RG` **or** `$LOG_WORKSPACE`, add
+`-p auditWorkspaceName=$LOG_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG` to
+the §7a deployment alongside the existing `-p clusterName=$CLUSTER`. A test
+cluster with its own durable resources overrides both.
 
 > **It is capped at 1 GB/day, and the cap loses data.** Ingestion stops for the
 > rest of the UTC day once hit — that protects the budget and is the right default
@@ -475,6 +477,17 @@ az deployment group create  -g $CLUSTER_RG -f infra/main.bicep -p infra/env/webs
 > a cluster still called `webservices-v2` — and every later step that does
 > `az aks show -n $CLUSTER` fails with "not found". A CLI `-p` takes precedence
 > over the same parameter in the `.bicepparam` file.
+
+> **A test cluster with its own durable resources overrides three params, not
+> one.** The param file pins the audit workspace to the production name *and*
+> resource group, so override both alongside `clusterName`:
+> ```
+> -p auditWorkspaceName=$LOG_WORKSPACE -p auditWorkspaceResourceGroup=$INFRA_RG
+> ```
+> §5b asserts these two against the bicepparam and prints `MISMATCH` if they
+> disagree — that assertion is what catches a forgotten override. Why a test
+> cluster gets its own durable resources at all: [decisions.md](decisions.md)
+> entry 20.
 
 `$CLUSTER_RG` is the cluster's resource group, distinct from the durable
 `$INFRA_RG`. AKS also auto-creates a *node* resource group (named
@@ -736,6 +749,7 @@ echo "GRAFANA_GITHUB_CLIENT_ID=$GRAFANA_GITHUB_CLIENT_ID"
 echo "DEX_GITHUB_CLIENT_ID=$DEX_GITHUB_CLIENT_ID"
 echo "VELERO_CLIENT_ID=$VELERO_CLIENT_ID"
 echo "BACKUP_STORAGE_ACCOUNT=$BACKUP_STORAGE_ACCOUNT"
+echo "INFRA_RG=$INFRA_RG"
 echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
 echo "NODE_RESOURCE_GROUP=$NODE_RESOURCE_GROUP"
 echo "KEY_VAULT_NAME=$KEY_VAULT_NAME"
@@ -749,7 +763,7 @@ Every placeholder is named for exactly one variable, so the rule is always
 | 1 | `k8s/argocd/infra-apps/external-secrets.yaml` | `<ESO_CLIENT_ID>` |
 | 2 | `k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml` | `<GRAFANA_GITHUB_CLIENT_ID>` |
 | 3 | `k8s/infra-manifest/dex/values.yaml` | `<DEX_GITHUB_CLIENT_ID>` |
-| 4 | `k8s/argocd/infra-apps/velero.yaml` | `<VELERO_CLIENT_ID>`, `<BACKUP_STORAGE_ACCOUNT>`, `<SUBSCRIPTION_ID>` (**twice**), `<NODE_RESOURCE_GROUP>` |
+| 4 | `k8s/argocd/infra-apps/velero.yaml` | `<VELERO_CLIENT_ID>`, `<BACKUP_STORAGE_ACCOUNT>`, `<INFRA_RG>`, `<SUBSCRIPTION_ID>` (**twice**), `<NODE_RESOURCE_GROUP>` |
 | 5 | `k8s/infra-manifest/external-secrets/clustersecretstore.yaml` | `<KEY_VAULT_NAME>` (inside `vaultUrl`) |
 | 6 | `k8s/infra-manifest/postgres/cluster.yaml` | `<BACKUP_STORAGE_ACCOUNT>` (**twice** — the ExternalSecret template and the ObjectStore `destinationPath`) |
 

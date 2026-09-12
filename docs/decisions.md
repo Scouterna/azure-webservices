@@ -29,6 +29,7 @@ say why rather than deleting it.
 | [17](#17-the-telemetry-store-is-named-for-its-job-and-minio-is-reserved) | The telemetry store is named for its job, and "MinIO" is reserved | current |
 | [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
 | [19](#19-metric-retention-is-sized-from-a-measured-rate-and-0-is-not-unlimited) | Metric retention is sized from a measured rate, and `0` is not unlimited | current |
+| [20](#20-a-test-cluster-that-outlives-its-install-gets-its-own-durable-resources) | A test cluster that outlives its install gets its own durable resources | current |
 
 ---
 
@@ -1009,3 +1010,60 @@ and stops ingestion for every project on the cluster.
 35 to 90 days because the loss of an infra PVC is typically noticed weeks after
 it happens, and a 35-day window can expire before anyone looks. The J26 loss was
 found after a month — inside 90 days, outside 35.
+
+## 20. A test cluster that outlives its install gets its own durable resources
+
+**Current.** A test cluster kept running alongside the real one is given its own
+durable resource group — its own Key Vault, backup storage account and audit
+workspace. It shares nothing with production but the subscription.
+
+**Why: three things collide, and two of them destroy data.**
+
+- **Postgres backups land in the same path.** Both clusters run a CNPG `Cluster`
+  named `shared` writing to the `cnpg-shared` container under the same
+  `serverName`. Two different PostgreSQL instances, one Barman path, different
+  system identifiers. The `serverName` set in entry 19's wake protects a
+  *rebuild*; it does nothing for two clusters running at once.
+- **Velero expires backups it did not create.** The `BackupStorageLocation` has
+  no `prefix`, so both clusters write to the root of the `velero` container —
+  and each one syncs that location and deletes whatever is past its TTL. The
+  test cluster would delete the real cluster's backups.
+- **The GitHub OAuth secrets are per-hostname.** One OAuth app has one callback
+  URL, so test and production need different apps. Sharing a vault means the
+  production install writes its client secret over the key the test cluster
+  reads, and the test cluster's SSO stops working.
+
+Sharing the vault would also hand both clusters the **same Sealed Secrets private
+key**, so a `SealedSecret` committed for one decrypts in the other.
+
+**Why separate resources rather than separate names.** Every durable value is
+already an install-time input, in one of three forms:
+
+| Form | Values |
+|---|---|
+| Runbook variables (`install.md` §0) | `$INFRA_RG`, `$KEY_VAULT_NAME`, `$BACKUP_STORAGE_ACCOUNT`, `$LOG_WORKSPACE` |
+| Manifest placeholders, filled in §9 | `<KEY_VAULT_NAME>`, `<BACKUP_STORAGE_ACCOUNT>`, `<INFRA_RG>` |
+| Bicep params, overridden on the CLI | `auditWorkspaceName`, `auditWorkspaceResourceGroup` |
+
+The third row is the one that catches people: the audit workspace is pinned in
+`webservices.bicepparam`, not templated, so a test cluster must override both of
+its params alongside `clusterName` — which is why §7a says three, not one.
+
+Pointing a test cluster at its own resources therefore costs no code change, and
+the production install stays exactly as documented.
+
+**Rejected: one shared vault with `-test` suffixed keys.** That plus a Velero
+prefix plus a distinct `serverName` is three separate patches rather than one
+boundary, and each can be undone later by an operator writing to the wrong key.
+
+**Rejected: sharing the durable RG and being careful.** "Careful" is not a
+control. The failure mode is silent in all three cases — a backup that overwrites
+another, a deletion that looks like retention, a secret that is simply the wrong
+value.
+
+**Cost, accepted.** One extra storage account and one extra vault for as long as
+the test cluster lives. Both are deleted with its resource group.
+
+**Authentication is not a reason to share.** A managed identity accepts many
+federated credentials, so one identity could serve both clusters. That makes
+sharing *possible*, not advisable.

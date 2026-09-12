@@ -37,8 +37,10 @@ PROJECT="${1:?project name required}"
 # which resource group to look in. It is deliberately NOT passed to the az call:
 # storage account names are globally unique, and `--resource-group` is deprecated
 # on `az storage container create`.
-INFRA_RG="webservices-infra"
-STORAGE_ACCOUNT="stwsv2backup"
+# Overridable, because a test cluster running alongside the real one has its own
+# durable resource group and storage account — docs/decisions.md entry 20.
+INFRA_RG="${INFRA_RG:-webservices-infra}"
+STORAGE_ACCOUNT="${BACKUP_STORAGE_ACCOUNT:-stwsv2backup}"
 CONTAINER="cnpg-${PROJECT}"
 
 # The project name becomes both a Kubernetes namespace and this container name.
