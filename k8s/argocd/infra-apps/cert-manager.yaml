@@ -26,6 +26,18 @@ spec:
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
       ref: values
+  ignoreDifferences:
+    # cainjector writes caBundle; AKS's admissionsenforcer also edits these.
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      managedFieldsManagers:
+        - cert-manager-cainjector
+        - admissionsenforcer
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      managedFieldsManagers:
+        - cert-manager-cainjector
+        - admissionsenforcer
   syncPolicy:
     automated:
       prune: true

@@ -150,9 +150,14 @@ they survive losing the cluster entirely.
 > `<destinationPath>/<serverName>/`, and the backup account deliberately outlives
 > the cluster. Rebuilding with the same `serverName` points a **new** database at
 > the **old** database's backup path — different system identifier, same
-> location. Bump `serverName` (e.g. `shared-1` → `shared-2`) in
-> `k8s/infra-manifest/postgres/cluster.yaml` whenever you rebuild against a
-> storage account that already holds backups.
+> location. Bump `serverName` (e.g. `shared-1` → `shared-2`) whenever you rebuild
+> against a storage account that already holds backups.
+>
+> It lives in the **`Cluster`'s plugin parameters** in
+> `k8s/infra-manifest/postgres/cluster.yaml`, next to `barmanObjectName` — **not**
+> on the `ObjectStore`. Barman plugin v0.13.0 forbids it there with a CEL rule on
+> the CRD, and an `ObjectStore` carrying it is rejected outright: it is never
+> created, so the `Cluster` never bootstraps and no Postgres pod appears at all.
 
 ### Verify the backups exist
 

@@ -42,8 +42,16 @@ INFRA_RG=webservices-infra        # durable RG: Key Vault, identities, backup st
 KEY_VAULT_NAME=kv-scouterna-webservices       # Key Vault name (globally unique, 3-24 chars)
 BACKUP_STORAGE_ACCOUNT=stwsv2backup              # backup storage account (globally unique, 3-24 lowercase alnum)
 LOG_WORKSPACE=log-webservices     # audit workspace (must match auditWorkspaceName in the bicepparam)
-ALERT_EMAIL=info@scouterna.se     # receives audit-pipeline alerts (a shared mailbox, not a person)
+# Receives the audit-pipeline alerts. A shared, monitored mailbox rather than a
+# person, whose address stops being read when they move on. Override it in the
+# shell for an install where that mailbox is not ready yet.
+ALERT_EMAIL=info@scouterna.se
 SLACK_ALERT_CHANNEL='#webservices-alerts'   # must match the channel in kube-prometheus-stack-values.yaml
+# Alertmanager posts to that channel through an Incoming Webhook. Create a Slack
+# app with one scoped to $SLACK_ALERT_CHANNEL, then paste the URL here in your
+# shell. It is a bearer credential: anyone holding it can post to the channel, so
+# the real value never gets committed.
+SLACK_WEBHOOK_URL=<incoming-webhook-url-from-slack>
 
 # --- Identities (in $INFRA_RG; persist across rebuilds) ---
 ESO_IDENTITY=id-eso-webservices       # managed identity ESO authenticates as
@@ -52,7 +60,11 @@ FEDCRED_ESO=eso-$CLUSTER              # ESO federated-credential name (one per c
 FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one per cluster)
 
 # --- DNS / access ---
-HOST=wsinfra.scouterna.net        # DNS suffix for the infra apps (Grafana, Headlamp, ...)
+# DNS suffix for the infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST.
+# Reaches the manifests as the <HOST> placeholder, filled in §9a. Setting it here
+# is enough — nothing downstream needs editing by hand.
+# The zone ws.scouterna.net is delegated to Azure DNS and lives in $INFRA_RG.
+HOST=ws.scouterna.net
 
 # --- Subscription (set EXPLICITLY — see the warning below) ---
 SUBSCRIPTION_ID=<the-target-subscription-id>
@@ -208,11 +220,19 @@ the vault in the right region too.
 ## 4. Managed identities + Key Vault role grant
 
 Two managed identities live in $INFRA_RG and persist across rebuilds: one for ESO
-(reads Key Vault), one for Velero (writes backups). Create them and grant ESO read
-access to the vault:
+(reads Key Vault), one for Velero (writes backups). Create them, grant ESO read
+access to the vault, and grant yourself write access:
 
 ```bash
 KEY_VAULT_ID=$(az keyvault show -n $KEY_VAULT_NAME --query id -o tsv)
+
+# Let yourself write secrets. Under RBAC authorization even the account that
+# created the vault needs an explicit role, and §5 already writes one secret,
+# so this cannot wait for §6.
+ME=$(az ad signed-in-user show --query id -o tsv)
+az role assignment create --assignee-object-id "$ME" --assignee-principal-type User \
+  --role "Key Vault Secrets Officer" --scope "$KEY_VAULT_ID"
+sleep 20    # RBAC propagation; a write attempted too early fails Forbidden
 
 # ESO identity — reads secrets from the Key Vault
 az identity create -g $INFRA_RG -n $ESO_IDENTITY -l $LOCATION
@@ -335,15 +355,18 @@ cluster with its own durable resources overrides both.
 
 ## 5c. Audit alerting
 
-Two rules, deployed outside the cluster so they still fire when the cluster is the
-problem — and independent of the in-cluster Alertmanager gap:
+Three rules, deployed outside the cluster so they still fire when the cluster is
+the problem — and independent of the in-cluster Alertmanager gap:
 
 ```bash
 az deployment group create -g $INFRA_RG -f infra/alerts.bicep   -p workspaceName=$LOG_WORKSPACE alertEmail=$ALERT_EMAIL
 ```
 
-- `audit-pipeline-deleted` — someone deletes the diagnostic setting or the
-  workspace. Collection stops silently; the Activity Log is the only record.
+- `audit-diagnostic-setting-deleted` and `audit-workspace-deleted` — someone
+  deletes the diagnostic setting or the workspace. Collection stops silently; the
+  Activity Log is the only record. Two rules rather than one because Azure
+  rejects a subscription-scope Administrative alert unless `operationName` is a
+  top-level `equals`, so it cannot match a list.
 - `audit-ingestion-capped` — the daily cap stops ingestion. The workspace keeps
   reporting healthy while dropping everything, so nothing else would show it.
 
@@ -371,17 +394,11 @@ the alert will fire and reach no one.
 **rebuild recreates them automatically** — you never hand-create in-cluster
 secrets.
 
-First let yourself write secrets (under an RBAC vault even the creator needs an
-explicit role), then set the four secrets. The GitHub client secret is the real
-value from §2.
+Your write access to the vault was granted back in §4, because §5 already
+needed it. Set the secrets now. The GitHub client secret is the real value
+from §2.
 
 ```bash
-# Grant yourself write access (once), then wait for RBAC to propagate
-ME=$(az ad signed-in-user show --query id -o tsv)
-az role assignment create --assignee-object-id "$ME" --assignee-principal-type User \
-  --role "Key Vault Secrets Officer" --scope "$KEY_VAULT_ID"
-sleep 20
-
 az keyvault secret list --vault-name $KEY_VAULT_NAME --query "[].name" -o tsv   # what already exists (durable vault)
 
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name telemetry-store-root-user     --value admin
@@ -393,9 +410,13 @@ az keyvault secret set --vault-name $KEY_VAULT_NAME --name grafana-github-client
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name dex-github-client-secret   --value "$DEX_GITHUB_CLIENT_SECRET"
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name dex-headlamp-client-secret --value "$DEX_HEADLAMP_CLIENT_SECRET"
 
-# Slack incoming webhook for Alertmanager. Create it in Slack first (an app with
-# an Incoming Webhook scoped to $SLACK_ALERT_CHANNEL); the URL is a bearer
-# credential — anyone holding it can post to the channel.
+# Slack incoming webhook for Alertmanager (§0). Assert before storing: a
+# placeholder here leaves Alertmanager running and delivering nothing, which
+# reads exactly like a quiet channel.
+case "$SLACK_WEBHOOK_URL" in
+  https://hooks.slack.com/services/*) ;;
+  *) echo "STOP: SLACK_WEBHOOK_URL is not a real Slack webhook — see §0" ;;
+esac
 az keyvault secret set --vault-name $KEY_VAULT_NAME --name alertmanager-slack-webhook-url   --value "$SLACK_WEBHOOK_URL"
 ```
 
@@ -546,7 +567,7 @@ az identity federated-credential create -g $INFRA_RG --identity-name $VELERO_IDE
   --audiences "api://AzureADTokenExchange"
 ```
 
-## 8b. Trust Dex on the API server (developer SSO)
+## 8b. Enable the JWTAuthenticator preview (subscription-wide)
 
 Without this, Headlamp and `kubectl` SSO **do not work**: Dex issues a valid
 token, the API server does not trust it, and every request is rejected. It is an
@@ -555,23 +576,23 @@ and the symptom does not point at it: the GitHub login succeeds and then **bounc
 straight back to the login screen**. (A login that succeeds and shows an *empty*
 UI is a different fault — that is RBAC, §8c or Headlamp's own role.)
 
-It is placed here, before ArgoCD, because it needs only a running cluster — not
-Dex itself. The `az feature register` can take several minutes to leave
-`Registering`, so starting it early keeps it off the critical path.
+It is placed here because `az feature register` is subscription-wide and can take
+several minutes to leave `Registering`. Doing it now keeps it off the critical
+path; the authenticator that uses it is registered in §11.
 
 > **Preview feature.** `JWTAuthenticatorPreview` is in preview; weigh that before
 > relying on it in production. The cluster is fully usable without it — you just
 > administer it with the admin kubeconfig instead of GitHub SSO.
 
 > ⚠️ **`az feature register` is SUBSCRIPTION-wide, not cluster-scoped.** The three
-> commands below have three different blast radii, and only one is confined to
-> this cluster:
+> commands this SSO path needs have three different blast radii, and only one is
+> confined to this cluster:
 >
 > | Command | Scope | Reaches other clusters? |
 > |---|---|---|
 > | `az extension add` | this **workstation** only | no — just your local `az` |
 > | `az feature register` | the whole **subscription** | **yes, potentially** |
-> | `az aks jwtauthenticator add` | this **cluster** only | no |
+> | `az aks jwtauthenticator add` (§11) | this **cluster** only | no |
 >
 > If the subscription also hosts production workloads, registering a preview
 > feature there is a decision to make deliberately — not a routine step. In
@@ -593,6 +614,21 @@ Dex itself. The `az feature register` can take several minutes to leave
 > extension: aks-preview`. That is expected, not a problem.
 
 ```bash
+# Check first. All three must be true before the authenticator can be added,
+# and on a subscription that has done this before they already are.
+az extension list --query "[?name=='aks-preview'].version" -o tsv   # expect a version
+az feature show --namespace Microsoft.ContainerService \
+  --name JWTAuthenticatorPreview --query properties.state -o tsv    # expect Registered
+az provider show --namespace Microsoft.ContainerService \
+  --query registrationState -o tsv                                  # expect Registered
+```
+
+**All three as expected? Skip the rest of this step** and continue at §8c.
+Feature registration is subscription-wide and permanent, so an earlier install on
+this subscription has already done it — there is nothing to repeat. Otherwise run
+only the parts that came back wrong:
+
+```bash
 az extension add --name aks-preview                                    # once per workstation
 # "No stable version ... Preview versions allowed" and "already installed" are
 # both normal: aks-preview only ever ships preview builds.
@@ -600,50 +636,23 @@ az extension add --name aks-preview                                    # once pe
 az feature register --namespace Microsoft.ContainerService --name JWTAuthenticatorPreview
 az feature show --namespace Microsoft.ContainerService --name JWTAuthenticatorPreview \
   --query properties.state -o tsv                                      # wait for "Registered"
-az provider register --namespace Microsoft.ContainerService            # after it shows Registered
+
+# REQUIRED once the feature flips, and the step most often skipped: until the
+# provider is re-registered the feature reads Registered without being in effect.
+az provider register --namespace Microsoft.ContainerService
 ```
 
-`infra/jwtauthenticator/dex.json` carries the claim mappings. **Its `issuer.url`
-is the one place `$HOST` is hardcoded** rather than substituted — everything else
-in this runbook derives from the variable, so this file is the one that silently
-points at the wrong cluster after a copy. Assert it, and rewrite it if it does not
-match:
+`infra/jwtauthenticator/dex.json` and the `az aks jwtauthenticator add` that
+consumes it are **not here** — they are in §11, once Dex is actually serving.
+Azure fetches the issuer's discovery document and refuses an issuer it cannot
+reach, so the command cannot run before DNS and certificates exist:
 
-```bash
-# Fails loudly if the issuer does not match this cluster's $HOST.
-grep -q "\"url\": \"https://dex.$HOST\"" infra/jwtauthenticator/dex.json \
-  && echo "issuer OK: https://dex.$HOST" \
-  || echo "MISMATCH — currently: $(grep -o 'https://dex\.[^"]*' infra/jwtauthenticator/dex.json)"
-
-# If it mismatched, point it at this cluster (then commit the change):
-sed -i "s#\"url\": \"https://dex\.[^\"]*\"#\"url\": \"https://dex.$HOST\"#" \
-  infra/jwtauthenticator/dex.json
-
-az aks jwtauthenticator add -g $CLUSTER_RG --cluster-name $CLUSTER \
-  --name dex --config-file infra/jwtauthenticator/dex.json
-# use `update` instead of `add` if one already exists
+```
+(JWTAuthenticatorInvalidIssuer) The issuer URL "https://dex.<HOST>" must be
+publicly accessible.
 ```
 
-> A wrong issuer is **not** rejected at apply time — the resource is created
-> happily and every login then fails token validation, which looks like a broken
-> Dex rather than a stale URL.
-
-This maps a Dex token to a cluster identity: the user becomes
-`aks:jwt:<github-login>`, and each GitHub team becomes
-`aks:jwt:<org>:<Team Display Name>` — the **display name verbatim, spaces
-included**, not the slug.
-
-**Assert it landed before moving on.** This is the only step in Part 3 that
-leaves no cluster-visible artifact — no pod, no CR, nothing `kubectl` can show —
-so a skipped or failed §8b stays invisible until someone tries to log in at §11,
-about fifteen steps later:
-
-```bash
-az aks jwtauthenticator list -g $CLUSTER_RG --cluster-name $CLUSTER \
-  --query "[].name" -o tsv        # expect: dex
-```
-
-Empty output means it was never applied. Re-run the `add` above.
+Only the subscription-level enablement above belongs this early.
 
 ## 8c. Grant the infra team cluster-admin
 
@@ -731,10 +740,52 @@ needs the DNS from §11. Verification is in §11.
 Project developers are *not* granted here — they get per-namespace RoleBindings
 through the normal onboarding flow (see [onboarding.md](onboarding.md) section B).
 
+**Commit the kubeconfig.** It is how developers get it — `k8s/access/README.md`
+points them at the repo copy. It holds the API server address, the cluster's
+public CA and an `exec` block, and **no token or secret**, so it is safe in a
+public repo. It is also cluster-specific, so a rebuild replaces it:
+
+```bash
+git add k8s/access/oidc-kubeconfig
+git commit -m "Update the shared developer kubeconfig"   # first install or rebuild
+```
+
+> Despite the name, this file is **not** ignored by `.gitignore`, and that is
+> deliberate — the patterns there (`kubeconfig`, `*.kubeconfig`) target the
+> *admin* kubeconfig, which does carry credentials and must never be committed.
+
 ## 9. Fill the manifest placeholders, then commit + push
 
-Gather the remaining values, then fill the `<...>` placeholders in the manifests.
-These are Azure identifiers, not secrets — safe to commit.
+Fill the `<...>` placeholders in the manifests. These are hostnames and Azure
+identifiers, not secrets — safe to commit.
+
+### 9a. `<HOST>` and `<CLUSTER>` — fill these mechanically
+
+Both are already set from §0, so neither needs a lookup and neither should be
+edited by hand: `<HOST>` alone appears 13 times across four files.
+
+```bash
+# Every occurrence, in one pass. Run from the repo root.
+grep -rlZ -e '<HOST>' -e '<CLUSTER>' k8s/ \
+  | xargs -0 sed -i -e "s#<HOST>#$HOST#g" -e "s#<CLUSTER>#$CLUSTER#g"
+
+git diff --stat    # expect: dex, headlamp x2, kube-prometheus-stack, alloy
+```
+
+`<HOST>` becomes the ingress host, the TLS host, Grafana's `root_url`, Dex's
+issuer and both OIDC callback URLs. `<CLUSTER>` becomes the Loki `cluster` label
+in **both** Alloy pipelines — pod logs and Kubernetes events. The one `<HOST>`
+this misses is `infra/jwtauthenticator/dex.json`, filled in §11 where it is
+used — it cannot be filled sooner, because Azure rejects an issuer that is not
+yet reachable.
+
+> These two were committed literals until 2026-09-12. A copy of the repo then
+> served the *original* cluster's hostnames while its operator pointed DNS and
+> certificates at a different one: certificates fail HTTP-01, every URL 404s, and
+> Dex issues tokens under an issuer nothing validates against. The runbook also
+> claimed the hostname derived from `$HOST`, and it did not.
+
+### 9b. The rest — read back from Azure, then edit
 
 ```bash
 # Read the three values only the running cluster / identities can give us.
@@ -771,12 +822,10 @@ Every placeholder is named for exactly one variable, so the rule is always
 > OAuth apps** — mixing them up breaks that login. That is why neither is called
 > just `GITHUB_CLIENT_ID`.
 
-> **Deploying under a different `$CLUSTER` name?** `alloy-values.yaml` hardcodes
-> the Loki `cluster` label as `webservices-v2` in **two** places (pod logs and
-> Kubernetes events). It is a plain Helm values file with no templating, so it
-> cannot pick the name up automatically. Change both or neither — a mismatch
-> silently splits logs and events across two `cluster` values, and event panels
-> read as empty rather than erroring.
+> **Alloy's two `cluster` labels must agree**, and §9a is what makes them. If you
+> ever edit them by hand instead, change both or neither: a mismatch silently
+> splits logs and events across two `cluster` values, and the event panels in
+> Grafana read as empty rather than erroring.
 
 > **Velero's two `resourceGroup` values are different on purpose** (row 4): the
 > backup storage location takes `$BACKUP_STORAGE_ACCOUNT`'s resource group
@@ -794,19 +843,22 @@ an unpushed edit has no effect. Push before applying the root app (§10), and ag
 whenever you change a filled-in value later:
 
 ```bash
-# Stage exactly the six files from the table above — never `git add -A`/`-u`,
-# which would sweep up anything else you happen to have modified.
+# Stage exactly the files 9a and 9b touched — never `git add -A`/`-u`, which
+# would sweep up anything else you happen to have modified.
 git add k8s/argocd/infra-apps/external-secrets.yaml \
         k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml \
         k8s/infra-manifest/dex/values.yaml \
         k8s/argocd/infra-apps/velero.yaml \
         k8s/infra-manifest/external-secrets/clustersecretstore.yaml \
-        k8s/infra-manifest/postgres/cluster.yaml
+        k8s/infra-manifest/postgres/cluster.yaml \
+        k8s/infra-manifest/headlamp/deployment.yaml \
+        k8s/infra-manifest/headlamp/ingress.yaml \
+        k8s/infra-manifest/monitoring/alloy-values.yaml
 
 git diff --cached          # review: only the placeholders you filled should appear
 git status --short         # anything still unstaged is intentionally left out
 
-git commit -m "Fill infra client-ids / vault URL"
+git commit -m "Fill infra hostnames / client-ids / vault URL"
 git push
 ```
 
@@ -950,16 +1002,33 @@ decrypt, including after the next rebuild.
 kubectl -n sealed-secrets logs deploy/sealed-secrets-controller --tail=50 | grep -i 'private key'
 ```
 
-Expect `registered private key` with **`secretname=sealed-secrets-key`**. A
-generated name like `sealed-secrets-keyXXXXX` means it lost the race. The fix is
-a restart, once the durable key exists:
+Expect `registered private key` with **`secretname=sealed-secrets-key`**. If the
+only name logged is a generated one like `sealed-secrets-keyXXXXX`, the controller
+won the race against ESO and made its own key. The fix is a restart, once the
+durable key exists:
 
 ```bash
 kubectl -n sealed-secrets rollout restart deploy/sealed-secrets-controller
 ```
 
-Then confirm the fingerprint matches Key Vault, and that the durable key is the
-newest (the controller seals with the most recent key it holds).
+**After a repair both names appear in the log, and that is correct** — the
+controller keeps every key it finds, so anything sealed with the old one stays
+decryptable. What matters is which key it *seals* with, which is the newest it
+holds. Ask the controller instead of reading the log:
+
+```bash
+kubectl -n sealed-secrets port-forward svc/sealed-secrets-controller 18080:8080 &
+sleep 3
+curl -sS http://127.0.0.1:18080/v1/cert.pem | openssl x509 -noout -fingerprint -sha256
+kill %1
+
+# Must be the same fingerprint as the durable cert in Key Vault:
+az keyvault secret show --vault-name $KEY_VAULT_NAME --name sealed-secrets-tls-crt \
+  --query value -o tsv | openssl x509 -noout -fingerprint -sha256
+```
+
+If they differ, the controller is sealing with a key that is **not** in Key Vault
+and the next rebuild cannot decrypt what you seal today.
 
 ### Backups are actually running
 
@@ -1113,8 +1182,15 @@ fails silently at post time. Prove it end to end rather than inferring it:
 kubectl -n monitoring get externalsecret alertmanager-slack   # READY True
 kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- ls /etc/alertmanager/secrets/alertmanager-slack/          # expect: webhook-url
 
-# 2. Alertmanager loaded the config and resolved the receivers
-kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- localhost:9093/api/v2/status | grep -o '"name":"slack"'
+# 2a. Alertmanager resolved the receivers. Use /api/v2/receivers, NOT
+#     /api/v2/status: status embeds the config as one escaped YAML string, where
+#     the receiver reads `name: slack`, so a JSON-shaped pattern never matches
+#     however correct the config is.
+kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- localhost:9093/api/v2/receivers | grep -o '"name":"slack"'
+
+# 2b. ...and that receiver is wired to the MOUNTED webhook file. 2a only proves
+#     the name exists; a receiver with no slack_configs also answers to it.
+kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- localhost:9093/api/v2/status   | grep -o 'api_url_file: /etc/alertmanager/secrets/alertmanager-slack/webhook-url'
 
 # 3. delivery works — fire a synthetic alert and watch for it in Slack
 kubectl -n monitoring exec sts/alertmanager-kps-kube-prometheus-stack-alertmanager -c alertmanager   -- wget -qO- --post-data='[{"labels":{"alertname":"SlackPipelineTest","severity":"critical"}}]'      --header='Content-Type: application/json' localhost:9093/api/v2/alerts
@@ -1266,6 +1342,75 @@ separate, GitHub-side question:
 > org your testers actually belong to. Same applies to Grafana's
 > `role_attribute_path` team slugs (§2a).
 
+### Register the Dex issuer with the API server
+
+Until this exists, Dex issues valid tokens and the API server rejects every one:
+the GitHub login succeeds and **bounces straight back to the login screen**. (A
+login that succeeds and shows an *empty* UI is a different fault — that is RBAC,
+§8c or Headlamp's own role.)
+
+**This cannot be done earlier.** `az aks jwtauthenticator add` fetches the
+issuer's OIDC discovery document and refuses an issuer it cannot reach, so it
+needs all three of: Dex running (wave 2, §10), DNS published (above), and a
+certificate issued. The preview feature it depends on was enabled in §8b.
+
+`infra/jwtauthenticator/dex.json` carries the claim mappings and holds a `<HOST>`
+placeholder. It is the one placeholder `--expect-filled` cannot see — the checker
+scans YAML under `k8s/`, and this is JSON under `infra/` — so fill and assert it
+by hand:
+
+```bash
+# Fill it. Matches both the <HOST> placeholder and an already-filled hostname,
+# so this is safe to re-run and safe on a copied tree.
+sed -i "s#\"url\": \"https://dex\.[^\"]*\"#\"url\": \"https://dex.$HOST\"#" \
+  infra/jwtauthenticator/dex.json
+
+# Then assert. -F: $HOST contains dots, which are regex wildcards unquoted.
+grep -qF "\"url\": \"https://dex.$HOST\"" infra/jwtauthenticator/dex.json \
+  && echo "issuer OK: https://dex.$HOST" \
+  || echo "MISMATCH — currently: $(grep -o 'https://dex\.[^"]*' infra/jwtauthenticator/dex.json)"
+
+# Prove Azure will accept the issuer BEFORE asking Azure for it — this is the
+# exact thing it checks, and a local failure here is far easier to read.
+curl -sS --max-time 10 -o /dev/null -w '%{http_code}\n' \
+  "https://dex.$HOST/.well-known/openid-configuration"     # expect 200
+
+az aks jwtauthenticator add -g $CLUSTER_RG --cluster-name $CLUSTER \
+  --name dex --config-file infra/jwtauthenticator/dex.json
+# use `update` instead of `add` if one already exists
+```
+
+> **Reachable is not the same as correct.** Azure checks that the issuer answers,
+> not that it is *this* cluster's Dex. An issuer pointing at some other live Dex
+> is accepted happily, and every login then fails token validation — which reads
+> as a broken Dex rather than a stale URL.
+
+This maps a Dex token to a cluster identity: the user becomes
+`aks:jwt:<github-login>`, and each GitHub team becomes
+`aks:jwt:<org>:<Team Display Name>` — the **display name verbatim, spaces
+included**, not the slug.
+
+**Assert it landed.** This step leaves no cluster-visible artifact — no pod, no
+CR, nothing `kubectl` can show — so a failed one stays invisible until someone
+tries to log in, just below:
+
+```bash
+az aks jwtauthenticator list -g $CLUSTER_RG --cluster-name $CLUSTER \
+  --query "[].name" -o tsv        # expect: dex
+```
+
+Empty output means it was never applied. Re-run the `add` above.
+
+Then commit the filled `dex.json`. Nothing reads it from git — `az` took it from
+your working tree — but it is the only record of which issuer this cluster was
+told to trust, and §9 could not stage it because it was not filled yet:
+
+```bash
+git add infra/jwtauthenticator/dex.json
+git commit -m "Point the JWTAuthenticator at this cluster's Dex"
+```
+
+
 ### Headlamp: log in and actually list something
 
 **The `200` above proves nothing about Headlamp working.** That curl hits `/`,
@@ -1289,12 +1434,12 @@ apart, so identify it before digging:**
 
 | Symptom | Cause | Where |
 |---|---|---|
-| Login **bounces back to the login screen** | API server does not trust Dex's token | **§8b** — assert the JWTAuthenticator exists |
+| Login **bounces back to the login screen** | API server does not trust Dex's token | **§11** — assert the JWTAuthenticator exists |
 | GitHub rejects you at Dex ("user not in required orgs or teams") | org/team gate | §2b, `orgs:` in dex values |
 | Login **succeeds, UI shows nothing** | RBAC | §8c group string, or Headlamp's own role below |
 
 The bounce-back case is the easiest to misread as a permissions problem, because
-the login itself works. Check §8b first — it leaves no cluster-visible artifact,
+the login itself works. Check §11 first — it leaves no cluster-visible artifact,
 so it is also the easiest step to have skipped:
 
 ```bash
@@ -1348,7 +1493,7 @@ kubectl --kubeconfig k8s/access/oidc-kubeconfig get nodes
 This opens a browser for GitHub login the first time. Success proves the whole
 developer path: Dex issues the token, the API server's JWTAuthenticator accepts
 its audience, and RBAC grants the access. `Unauthorized` here usually means
-`kubectl` is missing from the JWTAuthenticator's `audiences` (§8b) — run
+`kubectl` is missing from the JWTAuthenticator's `audiences` (§11) — run
 `kubectl oidc-login clean` after fixing it, to drop the cached rejected token.
 
 There is deliberately **no ArgoCD endpoint** — see the next section.

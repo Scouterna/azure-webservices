@@ -7,7 +7,7 @@ on this cluster, and what constrains it instead.
 
 Administering this cluster is meant to be **your GitHub identity**: Dex issues a
 token, the API server's JWTAuthenticator trusts it, and RBAC binds the infra
-team's GitHub group to `cluster-admin` ([install.md](install.md) §8b, §8c). That
+team's GitHub group to `cluster-admin` ([install.md](install.md) §11, §8c). That
 path is attributable to a person, and revoking it is removing them from the GitHub
 team.
 

@@ -9,7 +9,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: headlamp.wsinfra.scouterna.net
+    - host: headlamp.<HOST>
       http:
         paths:
           - path: /
@@ -22,4 +22,4 @@ spec:
   tls:
     - secretName: headlamp-tls
       hosts:
-        - headlamp.wsinfra.scouterna.net
+        - headlamp.<HOST>

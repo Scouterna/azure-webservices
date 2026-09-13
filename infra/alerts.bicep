@@ -51,8 +51,21 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
 
 // Someone deleting the diagnostic setting or the workspace is the tamper case: it
 // stops collection silently, and only the Activity Log records that it happened.
-resource tamperAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
-  name: 'audit-pipeline-deleted'
+// One rule per operation: a subscription-scope Administrative alert is rejected
+// unless operationName sits at the top level as `equals`. docs/decisions.md 9.
+var tamperRules = [
+  {
+    name: 'audit-diagnostic-setting-deleted'
+    operation: 'Microsoft.Insights/diagnosticSettings/delete'
+  }
+  {
+    name: 'audit-workspace-deleted'
+    operation: 'Microsoft.OperationalInsights/workspaces/delete'
+  }
+]
+
+resource tamperAlerts 'Microsoft.Insights/activityLogAlerts@2020-10-01' = [for rule in tamperRules: {
+  name: rule.name
   location: 'Global'
   tags: tags
   properties: {
@@ -67,16 +80,8 @@ resource tamperAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
           equals: 'Administrative'
         }
         {
-          anyOf: [
-            {
-              field: 'operationName'
-              equals: 'Microsoft.Insights/diagnosticSettings/delete'
-            }
-            {
-              field: 'operationName'
-              equals: 'Microsoft.OperationalInsights/workspaces/delete'
-            }
-          ]
+          field: 'operationName'
+          equals: rule.operation
         }
       ]
     }
@@ -88,7 +93,8 @@ resource tamperAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
       ]
     }
   }
-}
+}]
+
 
 // The daily cap stops ingestion and the workspace still reports healthy, so this is
 // the only thing that makes a blinded audit log visible. docs/decisions.md 9.

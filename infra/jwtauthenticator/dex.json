@@ -1,6 +1,6 @@
 {
   "issuer": {
-    "url": "https://dex.wsinfra.scouterna.net",
+    "url": "https://dex.<HOST>",
     "audiences": ["headlamp", "kubectl"]
   },
   "claimValidationRules": [
