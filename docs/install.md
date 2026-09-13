@@ -1109,8 +1109,11 @@ workspace, a hit daily cap, or a category that emits nothing all look identical
 from the cluster side. Query the workspace, which is the only thing that proves it:
 
 ```bash
+# `[]`, not `value[]`: az returns the settings as a bare list. `value[]` matches
+# nothing and prints an empty result, which reads as "no diagnostic setting" —
+# a false negative on the one step that is supposed to prove there is one.
 az monitor diagnostic-settings list --resource "$(az aks show -g $CLUSTER_RG -n $CLUSTER --query id -o tsv)" \
-  --query "value[].{name:name, table:logAnalyticsDestinationType, categories:logs[?enabled].category}" -o json
+  --query "[].{name:name, table:logAnalyticsDestinationType, categories:logs[?enabled].category}" -o json
 
 WORKSPACE_GUID=$(az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE --query customerId -o tsv)
 az monitor log-analytics query --workspace "$WORKSPACE_GUID" \
