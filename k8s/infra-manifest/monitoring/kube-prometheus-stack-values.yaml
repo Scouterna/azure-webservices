@@ -29,22 +29,22 @@ grafana:
       cert-manager.io/cluster-issuer: "letsencrypt-prod"
       acme.cert-manager.io/http01-ingress-class: "traefik"
     hosts:
-      - grafana.wsinfra.scouterna.net
+      - grafana.<HOST>
     path: /
     tls:
-      - secretName: grafana-wsinfra-scouterna-net-tls
+      - secretName: grafana-tls
         hosts:
-          - grafana.wsinfra.scouterna.net
+          - grafana.<HOST>
 
   grafana.ini:
     server:
-      domain: grafana.wsinfra.scouterna.net
-      root_url: https://grafana.wsinfra.scouterna.net
+      domain: grafana.<HOST>
+      root_url: https://grafana.<HOST>
 
     # Daily login = GitHub OAuth, restricted to the Scouterna org.
     # Create a GitHub OAuth App (Scouterna org -> Settings -> Developer settings
-    # -> OAuth Apps): Homepage https://grafana.wsinfra.scouterna.net,
-    # callback https://grafana.wsinfra.scouterna.net/login/github.
+    # -> OAuth Apps): Homepage https://grafana.<HOST>,
+    # callback https://grafana.<HOST>/login/github.
     # Put the Client ID below; the Client Secret comes from the mounted secret
     # (GF_AUTH_GITHUB_CLIENT_SECRET__FILE above), not this file.
     auth.github:
@@ -114,6 +114,16 @@ grafana:
       url: http://thanos-query.monitoring.svc.cluster.local:10902
       jsonData:
         timeInterval: 30s
+
+# AKS does not expose the controller manager or the scheduler, and Cilium
+# replaces kube-proxy, so all three Services sit with zero endpoints and their
+# *Down rules fire forever. docs/decisions.md entry 11.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
 
 prometheus:
   prometheusSpec:

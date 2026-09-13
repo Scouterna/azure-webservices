@@ -52,7 +52,7 @@ JWTAuthenticator is untested. **This is not pending a test** — the identity mo
 is the reason, and a test cannot change it.
 
 **Cost, accepted.** The JWTAuthenticator is an AKS preview feature applied
-out-of-band with `az` ([install.md](install.md) §8b), so the developer path depends
+out-of-band with `az` ([install.md](install.md) §11), so the developer path depends
 on a preview capability. Revocation is removing someone from the GitHub team, which
 takes effect on their next login; an already-issued token stays valid until it
 expires (`idTokens: 24h`).
@@ -283,15 +283,26 @@ of the original finding this change does not close, and it stays listed in
 [maintenance.md](maintenance.md). **Alerting for this workspace is Azure-side.**
 In-cluster alerting now exists (entry 11), but this workspace never depended on it
 and still should not — these rules must fire when the cluster is the problem:
-`infra/alerts.bicep` carries an action group with an email receiver and two rules,
-deployed outside the cluster so they still fire when the cluster is the problem.
+`infra/alerts.bicep` carries an action group with an email receiver and three
+rules, deployed outside the cluster so they still fire when the cluster is the
+problem.
 
-- **`audit-pipeline-deleted`** — an Activity Log alert on
-  `Microsoft.Insights/diagnosticSettings/delete` and
+- **`audit-diagnostic-setting-deleted`** and **`audit-workspace-deleted`** —
+  Activity Log alerts on `Microsoft.Insights/diagnosticSettings/delete` and
   `Microsoft.OperationalInsights/workspaces/delete`. This is the tamper case:
   deleting either stops collection silently, and the Activity Log is the only place
   it is recorded. Scoped to the subscription, because the point is to catch a delete
   wherever it happens.
+
+  **Why two rules and not one.** A subscription-scope alert with
+  `category: Administrative` is rejected unless it carries an additional
+  *top-level* condition, and `operationName` only counts there as a plain
+  `equals` — it cannot match a list. A nested `anyOf` of two operations fails
+  deploy with `UnsupportedCondition`; hoisting it to a top-level `containsAny`
+  fails with `ConditionFieldIsNull`, because the provider reads `equals` and
+  finds nothing. One rule per operation is the shape Azure accepts. **Neither
+  failure is caught by `az deployment group validate`, which reports Succeeded
+  for both broken shapes** — only a real deploy tells you.
 - **`audit-ingestion-capped`** — a log query rule on `_LogOperation`, firing when the
   daily cap stops ingestion. Without it the cap is invisible: the workspace keeps
   reporting healthy while dropping everything, which is what makes the cap abusable

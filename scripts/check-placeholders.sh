@@ -49,8 +49,12 @@ if [[ -n "$CACHED" && -n "$REF" ]]; then
 fi
 PATTERN='<[A-Z][A-Z0-9_]*>'
 
-# The twelve placeholders §9 fills, as "file:PLACEHOLDER". Kept explicit so that
-# DELETING one is a failure too, not just replacing it with a real value.
+# The placeholders §9 fills, as "file:PLACEHOLDER", one line PER OCCURRENCE.
+# Kept explicit so that DELETING one is a failure too, not just replacing it with
+# a real value. <HOST> and <CLUSTER> are the two that repeat heavily: both are
+# known from §0, and both used to be committed literals, which meant a copy of
+# this repo deployed the ORIGINAL cluster's hostname while its operator filled in
+# DNS and certificates for a different one.
 EXPECTED=$(cat <<'EOF'
 k8s/argocd/infra-apps/external-secrets.yaml:<ESO_CLIENT_ID>
 k8s/argocd/infra-apps/velero.yaml:<BACKUP_STORAGE_ACCOUNT>
@@ -60,8 +64,23 @@ k8s/argocd/infra-apps/velero.yaml:<SUBSCRIPTION_ID>
 k8s/argocd/infra-apps/velero.yaml:<SUBSCRIPTION_ID>
 k8s/argocd/infra-apps/velero.yaml:<VELERO_CLIENT_ID>
 k8s/infra-manifest/dex/values.yaml:<DEX_GITHUB_CLIENT_ID>
+k8s/infra-manifest/dex/values.yaml:<HOST>
+k8s/infra-manifest/dex/values.yaml:<HOST>
+k8s/infra-manifest/dex/values.yaml:<HOST>
+k8s/infra-manifest/dex/values.yaml:<HOST>
+k8s/infra-manifest/dex/values.yaml:<HOST>
 k8s/infra-manifest/external-secrets/clustersecretstore.yaml:<KEY_VAULT_NAME>
+k8s/infra-manifest/headlamp/deployment.yaml:<HOST>
+k8s/infra-manifest/headlamp/deployment.yaml:<HOST>
+k8s/infra-manifest/headlamp/ingress.yaml:<HOST>
+k8s/infra-manifest/headlamp/ingress.yaml:<HOST>
+k8s/infra-manifest/monitoring/alloy-values.yaml:<CLUSTER>
+k8s/infra-manifest/monitoring/alloy-values.yaml:<CLUSTER>
 k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<GRAFANA_GITHUB_CLIENT_ID>
+k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<HOST>
+k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<HOST>
+k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<HOST>
+k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml:<HOST>
 k8s/infra-manifest/postgres/cluster.yaml:<BACKUP_STORAGE_ACCOUNT>
 k8s/infra-manifest/postgres/cluster.yaml:<BACKUP_STORAGE_ACCOUNT>
 EOF
@@ -152,7 +171,9 @@ fi
 found=$(printf '%s\n' "$scanned" | sed -n $'s/^PH\t//p' | sort)
 
 if diff <(printf '%s\n' "$EXPECTED" | sort) <(printf '%s\n' "$found") >/dev/null; then
-  echo "check-placeholders: template intact in ${SCOPE} (12 placeholders)."
+  # Counted, not written out: a hardcoded number goes stale the moment EXPECTED
+  # changes, and a stale count is exactly the kind of quiet wrong this checks for.
+  echo "check-placeholders: template intact in ${SCOPE} ($(printf '%s\n' "$EXPECTED" | wc -l) placeholders)."
   exit 0
 fi
 

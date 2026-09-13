@@ -8,6 +8,9 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    # Admission defaulting, not an operator, writes the drift here: the diff is
+    # computed from a server-side apply dry-run so defaults are accounted for.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -18,9 +21,10 @@ spec:
   source:
     repoURL: https://github.com/Scouterna/azure-webservices.git
     targetRevision: main
+    # Not recursed (the default), so databases/ stays a separate app. Declaring
+    # `directory.recurse: false` here instead would be dropped from the stored
+    # object as a zero value, leaving infra-root permanently OutOfSync.
     path: k8s/infra-manifest/postgres
-    directory:
-      recurse: false          # databases/ is a separate app
   syncPolicy:
     automated:
       prune: true

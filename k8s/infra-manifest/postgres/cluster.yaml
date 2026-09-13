@@ -35,11 +35,6 @@ metadata:
 spec:
   configuration:
     destinationPath: "https://<BACKUP_STORAGE_ACCOUNT>.blob.core.windows.net/cnpg-shared"
-    # Barman stores under <destinationPath>/<serverName>/ and defaults
-    # serverName to the Cluster name. The backup account outlives the cluster,
-    # so a rebuild would write a NEW database into the OLD database's path.
-    # Bump this on every rebuild against a surviving account — docs/postgres.md.
-    serverName: shared-1
     azureCredentials:
       storageAccount:
         name: backup-storage-key
@@ -88,6 +83,9 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: shared-store
+        # Bump on every rebuild against a surviving account — docs/postgres.md.
+        # Rejected on the ObjectStore since plugin v0.13.0.
+        serverName: shared-1
   # No `bootstrap.initdb.database`: project databases are declared separately as
   # Database resources, not created here.
 ---

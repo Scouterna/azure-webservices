@@ -28,8 +28,8 @@ grow:
 
 | Zone | Owner | Example |
 |---|---|---|
-| infra services | infra | `*.wsinfra.scouterna.net` (test: `*.wsv2test.j26.se`) |
-| shared project wildcard | infra | `*.webservices.scouterna.net` — *planned* |
+| infra services | infra | `*.$HOST` — `*.ws.scouterna.net` in production, `*.test.ws.scouterna.net` in test |
+| shared project wildcard | infra | `*.app.ws.scouterna.net` — *planned* |
 | project-specific | the project | `*.wsjdev.se`, `scoutid.se`, … |
 
 Three things HTTP-01 cannot do:
@@ -67,18 +67,27 @@ HTTP-01 solver unselected as the fallback:
 solvers:
 - dns01:
     azureDNS:
-      hostedZoneName: webservices.scouterna.net
+      # Its own zone, so this and the selector below are the same string.
+      hostedZoneName: app.ws.scouterna.net
       resourceGroupName: <dns-rg>
       subscriptionID: <subscription>
       environment: AzurePublicCloud
       managedIdentity:
         clientID: <identity-client-id>
   selector:
-    dnsZones: ["webservices.scouterna.net"]
+    dnsZones: ["app.ws.scouterna.net"]
 - http01:
     ingress:
       class: traefik
 ```
+
+> **Both fields stay `app.ws.scouterna.net`.** Rule 2 above matches a zone *or
+> any subdomain of it*, and the infra hosts (`grafana.ws.scouterna.net`, `dex.`,
+> `headlamp.`) are subdomains of `ws.scouterna.net`. Widening the selector by one
+> label silently moves every infra certificate from HTTP-01 to DNS-01. Giving
+> `app.` its own zone is what keeps the two fields identical, so that mistake
+> reads as a mistake instead of looking like the deliberate asymmetry it would
+> otherwise be.
 
 Adding a zone later is additive — existing certificates keep using HTTP-01,
 untouched.
@@ -187,14 +196,25 @@ ongoing part — for a capability DNS-PERSIST-01 is on track to provide with a
 static record and no credential at all.
 
 **Revisit when either** a wildcard becomes genuinely blocking (the shared
-`*.webservices.scouterna.net` is the likely trigger), **or** Let's Encrypt ships
+`*.app.ws.scouterna.net` is the likely trigger), **or** Let's Encrypt ships
 dns-persist-01 to production *and* cert-manager implements it.
 
 **If a wildcard is needed before then**, the smallest step is one zone:
-`*.webservices.scouterna.net` on Azure DNS via Workload Identity.
+`*.app.ws.scouterna.net` on Azure DNS via Workload Identity.
 
 - It is infra-owned, so no third party's credential enters the cluster.
 - No stored secret — same federation pattern as ESO and Velero.
+- **No registrar involvement.** `ws.scouterna.net` is already an Azure DNS zone
+  in `webservices-infra` and already delegated, so both the child zone and its
+  `NS` delegation are created inside Azure by one command:
+
+  ```bash
+  az network dns zone create -g webservices-infra \
+    -n app.ws.scouterna.net -p ws.scouterna.net     # -p writes the NS delegation
+  ```
+
+  Delegating a zone at the registrar was the main cost of the earlier
+  `webservices.scouterna.net` plan, and it is now gone.
 - It delivers the wildcard that removes per-project certificate work, which is
   the strongest reason to do this at all.
 - Every Loopia-hosted zone stays on HTTP-01, exactly as today.
@@ -210,9 +230,19 @@ Then treat each further zone as its own decision, with that precedent to follow.
   deciding deliberately rather than by omission. **DNS-PERSIST-01 would make this
   question mostly go away** — the project publishes one TXT record instead of
   handing over a credential.
-- **Would `webservices.scouterna.net` be delegated to Azure DNS, or moved?**
-  Delegation (an `NS` record at Loopia for that subdomain only) keeps the parent
-  zone where it is and is the smaller change.
+- ~~**Would the shared wildcard zone be delegated to Azure DNS, or moved?**~~
+  **Resolved 2026-09-12** by choosing `*.app.ws.scouterna.net`. It sits under
+  `ws.scouterna.net`, which is already an Azure DNS zone in `webservices-infra`
+  and already delegated from the parent. No registrar change is needed.
+- ~~**Own Azure DNS zone for `app.`, or records inside `ws.scouterna.net`?**~~
+  **Resolved 2026-09-12: its own zone.** Records in the parent are simpler, but
+  `DNS Zone Contributor` is granted per zone, so naming the parent would let the
+  cluster rewrite **any** record in `ws.scouterna.net`, including the `A`/`AAAA`
+  records for `grafana`, `dex` and `headlamp`. Those are exactly the records
+  worth hijacking to intercept an admin login, and Azure would see the rewrite as
+  legitimate. A child zone confines the identity to project territory, and as a
+  second benefit makes `hostedZoneName` and `selector.dnsZones` the same string.
+  Create the zone **before** granting the identity.
 - **How does a wildcard certificate reach project namespaces?** A `Certificate`
   in one namespace produces a Secret in that namespace; Traefik will not read it
   from another. Options are a per-namespace `Certificate` against the same
