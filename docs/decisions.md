@@ -430,6 +430,25 @@ useless is to fill it on day one. `critical` gets its own route with a 1h repeat
 constantly by design and only matters if you are checking that the pipeline itself
 works. Raising `info` back up is a one-line change once the channel is quiet.
 
+**The API-server SLO rule groups are disabled, all three.** AKS runs the API
+server, so these rules are written for operators of a self-managed control plane.
+They are also the most expensive rules the chart ships, and on a small cluster
+they fail in a way that reads as a platform fault rather than a monitoring one.
+`kubeApiserverBurnrate` evaluated for 57s against a 30s interval on an 11-hour-old
+cluster, re-reading the whole TSDB continuously: the disk is provisioned for 500
+IOPS and 100 MB/s, and the rules demanded 1560 IOPS and 331 MB/s, which surfaced
+as `NodeDiskIOSaturation`. `kubeApiserverSlos` went with it because its
+`KubeAPIErrorBudgetBurn` alerts read the burn-rate recordings and would otherwise
+be alerts that can never fire. `kubeApiserverAvailability` followed on 2026-09-14
+for the same reason, one step later: its `increase30d` rules over the apiserver
+SLI **histogram buckets** grew from 0.1s to 150s over two days as the TSDB filled,
+crossed Prometheus's 2-minute default query timeout, and produced
+`PrometheusRuleFailures` (13 failures, all one rule,
+`cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d`)
+alongside a second round of `NodeDiskIOSaturation`. A 30-day window assumes a
+cluster that can afford to keep and re-scan 30 days of high-cardinality apiserver
+histograms; this is one node with a 500 IOPS disk.
+
 **Setting `config` replaces the chart default wholesale**, so the four inhibit
 rules are carried over by hand rather than inherited. They are what stops one
 critical alert dragging its warning and info siblings along. Dropping them would
