@@ -31,6 +31,7 @@ say why rather than deleting it.
 | [19](#19-metric-retention-is-sized-from-a-measured-rate-and-0-is-not-unlimited) | Metric retention is sized from a measured rate, and `0` is not unlimited | current |
 | [20](#20-a-test-cluster-that-outlives-its-install-gets-its-own-durable-resources) | A test cluster that outlives its install gets its own durable resources | current |
 | [21](#21-a-project-may-commit-its-own-sealedsecrets-plain-secret-stays-out) | A project may commit its own `SealedSecret`s; plain `Secret` stays out | current |
+| [22](#22-reserved-hostnames-are-enforced-at-admission) | Reserved hostnames are enforced at admission | current, amends 8 |
 
 ---
 
@@ -206,8 +207,11 @@ not match exactly. `admin` permits `RoleBinding`, `Role`, `ServiceAccount` and
 
 **What follows.** The excluded-kinds table in [onboarding.md](onboarding.md) is a
 statement of ownership, not purely a technical fence: creating those by hand is out
-of bounds and gets reverted. Closing the gap technically would need a
-`ValidatingAdmissionPolicy`, which is not deployed.
+of bounds and gets reverted. Closing *that* gap technically would need a
+`ValidatingAdmissionPolicy`, and none is deployed for those kinds — for a
+`RoleBinding` or `Secret` created by hand, RBAC plus review is still the boundary.
+One `ValidatingAdmissionPolicy` **is** now deployed, for a narrower and
+higher-severity gap: reserving the infra hostnames (entry 22).
 
 ## 9. Audit logging is `kube-audit-admin` only, capped, and off-cluster
 
@@ -1125,3 +1129,117 @@ were not changed here. `RoleBinding` is the one excluded kind that can hand a
 project's access to another person's identity, which is a stronger reason to keep
 infra in that loop — but it is worth deciding deliberately rather than by
 inheriting this one.
+
+## 22. Reserved hostnames are enforced at admission
+
+**Current.** A `ValidatingAdmissionPolicy` (`reserved-hostnames`,
+`k8s/infra-manifest/cluster-infra/admissionpolicy/`) governs every `Ingress`,
+Traefik `IngressRoute`, Gateway API `HTTPRoute` and `Gateway` created **in a
+project namespace**. Its binding selects only namespaces carrying
+`scouterna.se/project`, so infra's own routes are never evaluated. Two rules,
+both fail-closed:
+
+1. **A project route must name a host.** A route that names none matches *every*
+   host on the shared entrypoint, which is the same hijack by another route.
+2. **Inside the reserved zone (`<ZONE>`), only project territory
+   (`<APP_DOMAIN>`) may be claimed.** A project's own domains (`wsjdev.se`,
+   `scoutid.se`, …) are never in scope.
+
+The reserved zone and project territory are **two independent inputs**, not one
+derived from the other, because infra and projects publish as siblings: infra
+under `infra.<ZONE>`, projects under `app.<ZONE>`. That is what lets the policy
+reserve the *whole* zone — including the apex and any infra host added later,
+before anyone remembers to extend a list — while leaving project territory
+untouched.
+
+`IngressRoute` is the exception: its `match` is a free-form Traefik expression,
+not a structured host field, so the rule cannot reason about it host-by-host and
+is stricter instead. A project route must carry exactly one `Host()`, with no
+`||`, no `!` and no `HostRegexp`, and every backtick-quoted value that falls
+inside the reserved zone must be project territory. A project needing several
+hosts writes several routes. Two Traefik-specific catch-alls are refused by
+spelling rather than by hostname, because neither names the zone: a **trailing
+dot** (``Host(`dex.infra.<ZONE>.`)`` — the matcher retries with the dot stripped,
+so it routes the real host) and a **bare `*`** (``Host(`*`)`` returns true for
+every request, an explicit special case in Traefik's matcher). A wildcard *inside*
+project territory, ``Host(`*.app.<ZONE>`)``, is still allowed. Alternation and
+negation are refused rather than parsed: ``Host(`shop.app.<ZONE>`) || PathPrefix(`/keys`)`` names a legitimate
+host *and* matches every other one, so any check that is satisfied by the
+presence of a good host is bypassable by appending it.
+
+**Why: the shadow reaches the token-validation path, not just a victim's
+browser.** Traefik routes by `Host` across every namespace on one shared
+entrypoint, and router priority is by rule length — both tenant-settable
+([traefik/values.yaml](../k8s/infra-manifest/traefik/values.yaml),
+[the tenant AppProject](../k8s/argocd/projects/_project-gitops.yaml.example)
+whitelists `Ingress` and `IngressRoute`). A tenant route for
+``Host(`dex.<HOST>`) && PathPrefix(`/keys`)`` outranks Dex's `/` route, and TLS
+needs no attacker certificate because the `websecure` entrypoint terminates TLS
+itself (`--entryPoints.websecure.http.tls=true`) and picks the real `dex-tls`
+from its store by SNI. The API server fetches
+`https://dex.<HOST>/.well-known/openid-configuration` and then
+`https://dex.<HOST>/keys` to validate every Dex token
+([jwtauthenticator/dex.json](../infra/jwtauthenticator/dex.json)), so a hijacked
+`/keys` lets a tenant serve its own JWKS and mint a self-signed token with
+`groups: ["Scouterna:Webservices Infra"]` — the group bound to cluster-admin.
+That is a tenant→cluster-admin escalation with **no victim and no GitOps**. The
+same shadow also intercepts a real admin's `id_token` at
+`headlamp.<HOST>`/`grafana.<HOST>` (the originally identified risk).
+
+The by-hand path runs through `Ingress` specifically: `ClusterRole/admin`, which
+a project's developers hold in their own namespaces, grants `create` on
+`ingresses` but nothing on `traefik.io`. `IngressRoute` is reachable through a
+project's own GitOps repo, which the project also controls. Both paths are
+covered here because both end at the same router table.
+
+**Why a route must name a host at all.** Reserving hostnames only constrains
+routes that *name* one. Traefik's default priority is the rule's length, an
+explicit priority overrides it, and the higher value wins — so
+``PathPrefix(`/keys`)`` with `priority: 100000`, naming no host, outranks Dex's
+router for every host including `dex.<HOST>` while naming nothing reserved. The
+`Ingress` equivalent is a rule with no `host` plus
+`traefik.ingress.kubernetes.io/router.priority`. A catch-all router on a shared
+entrypoint has no legitimate tenant use, so requiring a named host closes the
+class rather than the instance — and once a host is named, priority stops
+mattering, because a router can only win requests its rule already matches.
+
+`spec.defaultBackend` is refused outright rather than checked, because it has no
+host to check: Traefik routes it as "all unmatched requests", and its own
+documentation warns that its priority may need lowering so it does not satisfy
+requests meant for other ingresses. It is therefore rejected even when the same
+`Ingress` carries a perfectly legitimate host rule alongside it.
+
+**Why in-cluster admission, and not the guardrail first agreed.** The agreed
+mitigation was a reserved-hostname check shipped in a future project
+starter-template, running in each project's own repo CI. That does not defend the
+by-hand `kubectl apply` path, and this repo's CI cannot see project routes at all
+(projects deploy from their own GitOps repos or by hand). Only in-cluster
+admission enforces on every path. This **amends entry 8**, which recorded that no
+`ValidatingAdmissionPolicy` was deployed and that the by-hand gap rested on RBAC
+and review; for hostnames it now rests on admission.
+
+**Rejected.** *Dropping the routing kinds from the tenant AppProject so infra
+provisions every route* — too much standing load on a volunteer infra team, and
+it does not stop a by-hand apply either. *Nesting project territory inside the
+infra hostnames* (infra on `<ZONE>` directly, projects on `app.<ZONE>`) — then
+every legitimate project hostname contains a reserved hostname as a substring,
+which forces the free-form `IngressRoute` rule to choose between rejecting
+legitimate project routes and accepting a bypass. Siblings remove the choice.
+*A HostRegexp allowance for projects* — a project has no need to match hostnames
+by regex, and a regex host can shadow one without ever naming it literally.
+*Reserving only the exact current infra hostnames* (`dex`, `headlamp`, `grafana`)
+— a new infra app added later would be unprotected until someone remembered to
+extend the list.
+
+**Not covered, deliberately.** `IngressRouteTCP` and `IngressRouteUDP` match on
+`HostSNI` and are **not** in this policy. They are unreachable today because the
+tenant AppProject omits them and `admin` does not cover `traefik.io` — RBAC, not
+admission, is what stops them. Whoever adds either to the tenant AppProject must
+extend this policy in the same change.
+
+**Cost, accepted.** The first admission policy in the cluster. It is CEL only, no
+webhook and no controller to run or keep alive, so it adds no failure mode of its
+own beyond `failurePolicy: Fail` on the four route kinds in project namespaces —
+which is the intended behaviour. Projects also lose Traefik's more expressive
+match syntax (alternation, negation, regexp hosts) on `IngressRoute`; one route
+per host is the supported shape.

@@ -218,7 +218,7 @@ kubectl auth can-i create deployments -n <namespace> \
 
 ### How a developer logs in
 
-**Headlamp (web UI):** browse to `https://headlamp.ws.scouterna.net`, click
+**Headlamp (web UI):** browse to `https://headlamp.infra.ws.scouterna.net`, click
 **Sign in**, authenticate with GitHub. They see only the namespaces their
 RoleBindings grant.
 

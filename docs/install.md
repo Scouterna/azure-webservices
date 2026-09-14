@@ -60,11 +60,14 @@ FEDCRED_ESO=eso-$CLUSTER              # ESO federated-credential name (one per c
 FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one per cluster)
 
 # --- DNS / access ---
-# DNS suffix for the infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST.
-# Reaches the manifests as the <HOST> placeholder, filled in §9a. Setting it here
+# ZONE is the delegated Azure DNS zone (in $INFRA_RG). The whole zone is reserved
+# for infra EXCEPT $APP_DOMAIN, which is project territory; admission enforces
+# that split in project namespaces — docs/decisions.md entry 22.
+# All three reach the manifests as placeholders, filled in §9a. Setting them here
 # is enough — nothing downstream needs editing by hand.
-# The zone ws.scouterna.net is delegated to Azure DNS and lives in $INFRA_RG.
-HOST=ws.scouterna.net
+ZONE=ws.scouterna.net             # test: test.ws.scouterna.net
+HOST=infra.$ZONE                  # infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST
+APP_DOMAIN=app.$ZONE              # projects publish here, and nowhere else in $ZONE
 
 # --- Subscription (set EXPLICITLY — see the warning below) ---
 SUBSCRIPTION_ID=<the-target-subscription-id>
@@ -761,22 +764,26 @@ git commit -m "Update the shared developer kubeconfig"   # first install or rebu
 Fill the `<...>` placeholders in the manifests. These are hostnames and Azure
 identifiers, not secrets — safe to commit.
 
-### 9a. `<HOST>` and `<CLUSTER>` — fill these mechanically
+### 9a. `<HOST>`, `<ZONE>`, `<APP_DOMAIN>`, `<CLUSTER>` — fill these mechanically
 
-Both are already set from §0, so neither needs a lookup and neither should be
+All four are already set from §0, so none needs a lookup and none should be
 edited by hand: `<HOST>` alone appears 13 times across four files.
 
 ```bash
 # Every occurrence, in one pass. Run from the repo root.
-grep -rlZ -e '<HOST>' -e '<CLUSTER>' k8s/ \
-  | xargs -0 sed -i -e "s#<HOST>#$HOST#g" -e "s#<CLUSTER>#$CLUSTER#g"
+grep -rlZ -e '<HOST>' -e '<ZONE>' -e '<APP_DOMAIN>' -e '<CLUSTER>' k8s/ \
+  | xargs -0 sed -i -e "s#<HOST>#$HOST#g" -e "s#<ZONE>#$ZONE#g" \
+                    -e "s#<APP_DOMAIN>#$APP_DOMAIN#g" -e "s#<CLUSTER>#$CLUSTER#g"
 
-git diff --stat    # expect: dex, headlamp x2, kube-prometheus-stack, alloy
+git diff --stat    # expect: dex, headlamp x2, kube-prometheus-stack, alloy,
+                   # cluster-infra/admissionpolicy/reserved-hostnames
 ```
 
 `<HOST>` becomes the ingress host, the TLS host, Grafana's `root_url`, Dex's
-issuer and both OIDC callback URLs. `<CLUSTER>` becomes the Loki `cluster` label
-in **both** Alloy pipelines — pod logs and Kubernetes events. The one `<HOST>`
+issuer and both OIDC callback URLs. `<ZONE>` and `<APP_DOMAIN>` are the reserved
+zone and project territory, and appear only in the admission policy that keeps
+them apart. `<CLUSTER>` becomes the Loki `cluster` label in **both** Alloy
+pipelines — pod logs and Kubernetes events. The one `<HOST>`
 this misses is `infra/jwtauthenticator/dex.json`, filled in §11 where it is
 used — it cannot be filled sooner, because Azure rejects an issuer that is not
 yet reachable.
