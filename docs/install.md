@@ -1284,8 +1284,41 @@ echo "A    *.$HOST -> $LB_V4"
 echo "AAAA *.$HOST -> $LB_V6"
 ```
 
+One wildcard record set covers every infra host, because they all sit under
+`$HOST`. In the zone the set is named relative to it — with
+`HOST=infra.$ZONE` that is `*.infra`:
+
+```bash
+RECORD="*.${HOST%.$ZONE}"          # infra.ws.scouterna.net in ws.scouterna.net -> *.infra
+echo "$RECORD"                     # check this before writing to a production zone
+
+az network dns record-set a create -g $INFRA_RG -z $ZONE -n "$RECORD" --ttl 300
+az network dns record-set a add-record -g $INFRA_RG -z $ZONE -n "$RECORD" \
+  --ipv4-address "$LB_V4"
+
+dig +short A grafana.$HOST @8.8.8.8      # expect $LB_V4
+```
+
+**Publish the AAAA only after the IPv6 check below passes.** Let's Encrypt
+prefers IPv6 when an AAAA exists, so an unreachable v6 address stops every
+certificate on the cluster from issuing while IPv4 looks healthy:
+
+```bash
+az network dns record-set aaaa create -g $INFRA_RG -z $ZONE -n "$RECORD" --ttl 300
+az network dns record-set aaaa add-record -g $INFRA_RG -z $ZONE -n "$RECORD" \
+  --ipv6-address "$LB_V6"
+
+dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
+```
+
 Both records must exist before cert-manager can complete HTTP-01 challenges from
 IPv6-only validation paths.
+
+> **The zone is shared with other installs.** `$ZONE` holds one wildcard per
+> cluster — `*.infra` for production, `*.test` for a test cluster — so
+> `add-record` is right and anything that rewrites the zone wholesale is not. A
+> test install writes its records into the **production** resource group, which is
+> a deliberate exception, and removing them is part of tearing that install down.
 
 > **IPv6 is fixed at cluster creation.** `ipFamilies` in `infra/aks.bicep` is
 > immutable — an existing IPv4-only cluster cannot be converted to dual-stack in
