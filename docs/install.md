@@ -767,7 +767,8 @@ identifiers, not secrets — safe to commit.
 ### 9a. `<HOST>`, `<ZONE>`, `<APP_DOMAIN>`, `<CLUSTER>` — fill these mechanically
 
 All four are already set from §0, so none needs a lookup and none should be
-edited by hand: `<HOST>` alone appears 13 times across four files.
+edited by hand: `<HOST>` alone appears 13 times across four files (15 in the
+text — two sit in comments, which the checker ignores).
 
 ```bash
 # Every occurrence, in one pass. Run from the repo root.
@@ -857,6 +858,7 @@ whenever you change a filled-in value later:
 git add k8s/argocd/infra-apps/external-secrets.yaml \
         k8s/infra-manifest/monitoring/kube-prometheus-stack-values.yaml \
         k8s/infra-manifest/dex/values.yaml \
+        k8s/infra-manifest/cluster-infra/admissionpolicy/reserved-hostnames.yaml \
         k8s/argocd/infra-apps/velero.yaml \
         k8s/infra-manifest/external-secrets/clustersecretstore.yaml \
         k8s/infra-manifest/postgres/cluster.yaml \
@@ -1619,7 +1621,7 @@ OAuth** app (§2a).
 
 - **Unfilled placeholder = stalled bring-up.** If apps don't reach
   `Synced`/`Healthy`, first check every §9 placeholder was filled, in the right
-  file, with the right value — all five files. It's easy to fill the client-ids
+  file, with the right value — every file §9 lists. It's easy to fill the client-ids
   and miss the `vaultUrl` in `clustersecretstore.yaml`:
   ```bash
   scripts/check-placeholders.sh --expect-filled            # your working tree
