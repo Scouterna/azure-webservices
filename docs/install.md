@@ -68,6 +68,11 @@ FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one pe
 ZONE=ws.scouterna.net             # test: test.ws.scouterna.net
 HOST=infra.$ZONE                  # infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST
 APP_DOMAIN=app.$ZONE              # projects publish here, and nowhere else in $ZONE
+# The Azure DNS zone that actually holds the records (§11). NOT the same thing as
+# $ZONE: a test install reserves test.ws.scouterna.net but its records still live
+# in the delegated ws.scouterna.net zone, as `*.infra.test`. There is no
+# test.ws.scouterna.net zone in Azure.
+DNS_ZONE=ws.scouterna.net
 
 # --- Subscription (set EXPLICITLY — see the warning below) ---
 SUBSCRIPTION_ID=<the-target-subscription-id>
@@ -1285,15 +1290,16 @@ echo "AAAA *.$HOST -> $LB_V6"
 ```
 
 One wildcard record set covers every infra host, because they all sit under
-`$HOST`. In the zone the set is named relative to it — with
-`HOST=infra.$ZONE` that is `*.infra`:
+`$HOST`. It is named **relative to `$DNS_ZONE`**, the delegated zone from §0 —
+not relative to `$ZONE`, which for a test install is a reserved suffix with no
+zone of its own:
 
 ```bash
-RECORD="*.${HOST%.$ZONE}"          # infra.ws.scouterna.net in ws.scouterna.net -> *.infra
-echo "$RECORD"                     # check this before writing to a production zone
+RECORD="*.${HOST%.$DNS_ZONE}"      # production -> *.infra    test -> *.infra.test
+echo "$RECORD"                     # read it before writing to a live zone
 
-az network dns record-set a create -g $INFRA_RG -z $ZONE -n "$RECORD" --ttl 300
-az network dns record-set a add-record -g $INFRA_RG -z $ZONE -n "$RECORD" \
+az network dns record-set a create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
+az network dns record-set a add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
   --ipv4-address "$LB_V4"
 
 dig +short A grafana.$HOST @8.8.8.8      # expect $LB_V4
@@ -1304,8 +1310,8 @@ prefers IPv6 when an AAAA exists, so an unreachable v6 address stops every
 certificate on the cluster from issuing while IPv4 looks healthy:
 
 ```bash
-az network dns record-set aaaa create -g $INFRA_RG -z $ZONE -n "$RECORD" --ttl 300
-az network dns record-set aaaa add-record -g $INFRA_RG -z $ZONE -n "$RECORD" \
+az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
+az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
   --ipv6-address "$LB_V6"
 
 dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
@@ -1314,11 +1320,12 @@ dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
 Both records must exist before cert-manager can complete HTTP-01 challenges from
 IPv6-only validation paths.
 
-> **The zone is shared with other installs.** `$ZONE` holds one wildcard per
-> cluster — `*.infra` for production, `*.test` for a test cluster — so
-> `add-record` is right and anything that rewrites the zone wholesale is not. A
-> test install writes its records into the **production** resource group, which is
-> a deliberate exception, and removing them is part of tearing that install down.
+> **One delegated zone serves every install.** `$DNS_ZONE` carries one wildcard
+> per cluster, so `add-record` is right and anything that rewrites the zone
+> wholesale is not. A test install therefore writes into the same zone — and the
+> same resource group — as production, which is a deliberate exception to
+> "touch nothing without `test` in the name"; removing those records belongs to
+> tearing that install down.
 
 > **IPv6 is fixed at cluster creation.** `ipFamilies` in `infra/aks.bicep` is
 > immutable — an existing IPv4-only cluster cannot be converted to dual-stack in
