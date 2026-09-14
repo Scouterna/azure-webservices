@@ -62,6 +62,7 @@ database.
 
    ```bash
    scripts/new-project-db.sh <project> dev prod      # list the real environments
+   scripts/new-project-db.sh --single <project>      # one namespace, no -env suffix
    ```
 
    The password is a **SealedSecret**, not a Key Vault key, so this needs a GitHub
@@ -74,7 +75,7 @@ database.
 4. Verify:
    ```bash
    kubectl get database,databaserole -n postgres
-   kubectl get externalsecret -n <project>-prod
+   kubectl get sealedsecret -n <project>-prod        # or -n <project> with --single
    ```
 
 `prune` is **disabled** on the `postgres-databases` app and

@@ -106,7 +106,8 @@ is excluded.
      ```
      If the project later registers its own GitOps repo, trim `gitops.yaml`'s
      `environments` list to match — an entry naming a namespace that does not
-     exist produces an Application that can never sync.
+     exist produces an Application that can never sync. A database for this
+     project is generated with `--single` for the same reason ("Add a database").
    - **add staging:** copy the namespace file and edit the copy:
      ```bash
      sed "s/dev/staging/g" infra/namespace-dev.yaml > infra/namespace-staging.yaml
@@ -661,6 +662,13 @@ infra secrets. See [decisions.md](decisions.md).
    ENVS="dev prod"                                   # match §A2; add staging etc.
    scripts/new-project-db.sh "$PROJECT" $ENVS        # unquoted: one arg per env
    ```
+
+   > **One namespace only?** If §A2 collapsed this project to a single namespace
+   > named `$PROJECT`, run `scripts/new-project-db.sh --single "$PROJECT"` and
+   > verify with `-n "$PROJECT"` in step 3 — the database, role and namespace all
+   > drop the `-env` suffix. Passing environments instead seals the Secret to
+   > `$PROJECT-<env>`, which does not exist, and `--scope strict` binds the
+   > ciphertext to that name: it could never be unsealed in `$PROJECT`.
 
    > **Re-running rotates the passwords.** It refuses to overwrite existing files
    > for that reason; `--force` is the deliberate way to rotate, and it changes the
