@@ -92,6 +92,10 @@ if ! "${FETCH[@]}" >/dev/null 2>&1; then
   exit 1
 fi
 
+# The databases dir holds only generated files plus a README; a clone that has
+# never generated one still needs it to exist before the redirection below.
+mkdir -p "$(dirname "$INFRA_FILE")"
+
 HOST="shared-rw.postgres.svc.cluster.local"
 PORT="5432"
 

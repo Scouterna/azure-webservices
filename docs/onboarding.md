@@ -658,7 +658,8 @@ infra secrets. See [decisions.md](decisions.md).
 
    ```bash
    cd "$(git rev-parse --show-toplevel)"
-   scripts/new-project-db.sh "$PROJECT" dev prod     # match §A2; add staging etc.
+   ENVS="dev prod"                                   # match §A2; add staging etc.
+   scripts/new-project-db.sh "$PROJECT" $ENVS        # unquoted: one arg per env
    ```
 
    > **Re-running rotates the passwords.** It refuses to overwrite existing files
@@ -697,14 +698,14 @@ infra secrets. See [decisions.md](decisions.md).
    ```bash
    kubectl get database,databaserole -n postgres | grep "$PROJECT"   # one pair per env
    for env in $ENVS; do
-     kubectl get externalsecret -n "$PROJECT-$env"                   # READY=True
+     kubectl get sealedsecret -n "$PROJECT-$env"                     # SYNCED=True
      kubectl get secret -n "$PROJECT-$env" "$PROJECT-db" \
        -o jsonpath='{.data.dbname}' | base64 -d; echo                # PROJECT-<env>
    done
    ```
    **Empty output usually means an unpushed commit, not a broken database.**
    Nothing exists in the cluster until ArgoCD reads it from the remote, and the
-   symptom — no `Database`, no `ExternalSecret` — looks identical to a failed
+   symptom — no `Database`, no `SealedSecret` — looks identical to a failed
    sync. Check that first:
 
    ```bash
