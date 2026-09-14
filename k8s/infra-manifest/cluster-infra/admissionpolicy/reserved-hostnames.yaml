@@ -38,16 +38,20 @@ spec:
       expression: "'.' + variables.app"
   validations:
     # Every rule must name a host, and that host must be project territory or
-    # outside the zone entirely (a project's own domain).
+    # outside the zone entirely (a project's own domain). defaultBackend is
+    # refused outright: Traefik routes it as "all unmatched requests", which is
+    # the catch-all under another name.
     - expression: >-
         request.resource.resource != 'ingresses' ||
-        (has(object.spec) && has(object.spec.rules) && object.spec.rules.size() > 0 &&
+        (has(object.spec) && !has(object.spec.defaultBackend) &&
+         has(object.spec.rules) && object.spec.rules.size() > 0 &&
          object.spec.rules.all(r, has(r.host) &&
            (r.host == variables.app || r.host.endsWith(variables.appDot) ||
             !(r.host == variables.zone || r.host.endsWith(variables.zoneDot)))))
-      message: "Ingress in a project namespace must name a host, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
+      message: "Ingress in a project namespace must name a host in every rule and must not set defaultBackend, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
       messageExpression: >-
-        'Ingress in a project namespace must name a host in every rule, and inside ' +
+        'Ingress in a project namespace must name a host in every rule and must not ' +
+        'set defaultBackend, and inside ' +
         variables.zone + ' only ' + variables.app + ' is project territory ' +
         '(see docs/decisions.md entry 21)'
     # Traefik's match is a free-form expression, so this is fail-closed: one

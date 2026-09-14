@@ -1145,11 +1145,17 @@ routes that *name* one. Traefik's default priority is the rule's length, an
 explicit priority overrides it, and the higher value wins — so
 ``PathPrefix(`/keys`)`` with `priority: 100000`, naming no host, outranks Dex's
 router for every host including `dex.<HOST>` while naming nothing reserved. The
-`Ingress` equivalent is a rule with no `host` (or only a `defaultBackend`) plus
+`Ingress` equivalent is a rule with no `host` plus
 `traefik.ingress.kubernetes.io/router.priority`. A catch-all router on a shared
 entrypoint has no legitimate tenant use, so requiring a named host closes the
 class rather than the instance — and once a host is named, priority stops
 mattering, because a router can only win requests its rule already matches.
+
+`spec.defaultBackend` is refused outright rather than checked, because it has no
+host to check: Traefik routes it as "all unmatched requests", and its own
+documentation warns that its priority may need lowering so it does not satisfy
+requests meant for other ingresses. It is therefore rejected even when the same
+`Ingress` carries a perfectly legitimate host rule alongside it.
 
 **Why in-cluster admission, and not the guardrail first agreed.** The agreed
 mitigation was a reserved-hostname check shipped in a future project
