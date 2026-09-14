@@ -1129,6 +1129,7 @@ were not changed here. `RoleBinding` is the one excluded kind that can hand a
 project's access to another person's identity, which is a stronger reason to keep
 infra in that loop — but it is worth deciding deliberately rather than by
 inheriting this one.
+
 ## 22. Reserved hostnames are enforced at admission
 
 **Current.** A `ValidatingAdmissionPolicy` (`reserved-hostnames`,
@@ -1156,8 +1157,13 @@ not a structured host field, so the rule cannot reason about it host-by-host and
 is stricter instead. A project route must carry exactly one `Host()`, with no
 `||`, no `!` and no `HostRegexp`, and every backtick-quoted value that falls
 inside the reserved zone must be project territory. A project needing several
-hosts writes several routes. Alternation and negation are refused rather than
-parsed: ``Host(`shop.app.<ZONE>`) || PathPrefix(`/keys`)`` names a legitimate
+hosts writes several routes. Two Traefik-specific catch-alls are refused by
+spelling rather than by hostname, because neither names the zone: a **trailing
+dot** (``Host(`dex.infra.<ZONE>.`)`` — the matcher retries with the dot stripped,
+so it routes the real host) and a **bare `*`** (``Host(`*`)`` returns true for
+every request, an explicit special case in Traefik's matcher). A wildcard *inside*
+project territory, ``Host(`*.app.<ZONE>`)``, is still allowed. Alternation and
+negation are refused rather than parsed: ``Host(`shop.app.<ZONE>`) || PathPrefix(`/keys`)`` names a legitimate
 host *and* matches every other one, so any check that is satisfied by the
 presence of a good host is bypassable by appending it.
 

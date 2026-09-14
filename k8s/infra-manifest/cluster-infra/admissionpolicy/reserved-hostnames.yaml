@@ -57,6 +57,9 @@ spec:
     # Traefik's match is a free-form expression, so this is fail-closed: one
     # named host per route, no alternation, no negation, no regexp. A project
     # needing several hosts writes several routes.
+    # Two Traefik-specific catch-alls are refused by spelling, since neither
+    # names the zone: a trailing dot (the matcher retries with it stripped) and
+    # a bare `*` (matches every request). docs/decisions.md entry 22.
     - expression: >-
         request.resource.resource != 'ingressroutes' ||
         (has(object.spec) && has(object.spec.routes) &&
@@ -64,6 +67,7 @@ spec:
            r.match.lowerAscii().contains('host(`') &&
            !r.match.lowerAscii().contains('hostregexp') &&
            !r.match.contains('||') && !r.match.contains('!') &&
+           !r.match.contains('.`') && !r.match.contains('`*`') &&
            r.match.lowerAscii().split('`').all(tok,
              !(tok == variables.zone || tok.endsWith(variables.zoneDot)) ||
               (tok == variables.app || tok.endsWith(variables.appDot)))))
