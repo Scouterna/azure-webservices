@@ -1316,24 +1316,7 @@ az network dns record-set a show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
 dig +short A grafana.$HOST @8.8.8.8      # expect $LB_V4
 ```
 
-**Publish the AAAA only after the IPv6 check below passes.** Let's Encrypt
-prefers IPv6 when an AAAA exists, so an unreachable v6 address stops every
-certificate on the cluster from issuing while IPv4 looks healthy:
-
-```bash
-az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
-az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
-  --ipv6-address "$LB_V6"
-
-# Same append behaviour here — exactly one address, the current one:
-az network dns record-set aaaa show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
-  --query "AAAARecords[].ipv6Address" -o tsv
-
-# az network dns record-set aaaa remove-record -g $INFRA_RG -z $DNS_ZONE \
-#   -n "$RECORD" --ipv6-address <stale-ip> --keep-empty-record-set
-
-dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
-```
+**The AAAA record is published further down**, after the IPv6 checks — publishing it before v6 is known good stops every certificate on the cluster from issuing.
 
 Both records must exist before cert-manager can complete HTTP-01 challenges from
 IPv6-only validation paths.
@@ -1381,6 +1364,23 @@ IPv6-only validation paths.
 > An empty `$LB_V6` produces `curl: (3) URL using bad/illegal format or missing
 > URL` — that means the assignment block above did not run in this shell (or
 > `KUBECONFIG` was not set), not that IPv6 is broken.
+
+**Now publish the AAAA**, with the v6 address confirmed reachable above:
+
+```bash
+az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
+az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --ipv6-address "$LB_V6"
+
+# add-record appends here too — exactly one address, the current one:
+az network dns record-set aaaa show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --query "AAAARecords[].ipv6Address" -o tsv
+
+# az network dns record-set aaaa remove-record -g $INFRA_RG -z $DNS_ZONE \
+#   -n "$RECORD" --ipv6-address <stale-ip> --keep-empty-record-set
+
+dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
+```
 
 ---
 
