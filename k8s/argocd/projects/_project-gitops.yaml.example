@@ -75,6 +75,11 @@ spec:
       kind: IngressRoute
     - group: 'traefik.io'
       kind: Middleware
+    # Committed SealedSecrets. Safe to permit: the ciphertext is bound to this
+    # cluster's key AND to its own namespace/name, so it cannot be retargeted.
+    # Same reasoning as project-infra. docs/decisions.md entry 21.
+    - group: 'bitnami.com'
+      kind: SealedSecret
 
   # DELIBERATELY EXCLUDED — each of these is a real escalation, not an oversight:
   #
@@ -87,7 +92,11 @@ spec:
   #                       escape to cluster-admin — Application and AppProject
   #                       are themselves namespaced CRs in argocd
   #   postgresql.cnpg.io  databases are Layer 1, on the shared server
-  #   SealedSecret        would let the project mint Secrets indirectly
+  #
+  # SealedSecret is NOT on this list — see the whitelist above and entry 21.
+  # Plain Secret still is: not because it reaches anyone else, but because
+  # committing plaintext is a decision infra would rather a project made
+  # deliberately, by hand, than by a sync that looks like every other sync.
   #
   # Anything the project needs from this list is an infra request, delivered
   # through k8s/projects/PROJECT/infra/ — which only infra can commit.

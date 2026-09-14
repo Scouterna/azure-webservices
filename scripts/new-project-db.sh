@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# Generate a project's database manifests, with passwords SEALED into git.
+#
+# Why this exists: onboarding a project used to require `az keyvault secret set`,
+# so it needed an Azure/Entra account. Only one person held Key Vault Secrets
+# Officer. Sealing the password instead means onboarding needs a GitHub account
+# and cluster access (which the infra team already has via Dex), and nothing else.
+# Key Vault stays the store for INSTALL-time infra secrets. docs/decisions.md.
+#
+# One password per environment is generated here and written into BOTH files that
+# need it — they must not drift:
+#   k8s/infra-manifest/postgres/databases/<project>.yaml   role + database (infra)
+#   k8s/projects/<project>/infra/database.yaml             connection Secret
+#
+# Passwords are held in shell variables only. Nothing plaintext touches disk.
+#
+# Usage:
+#   scripts/new-project-db.sh <project> <env> [<env>...]
+#   scripts/new-project-db.sh proj-wsj27 dev staging prod
+#   scripts/new-project-db.sh --single proj-wsj27
+#
+# Options:
+#   --cert FILE   seal against a certificate file instead of the live cluster
+#                 (the sealing key is durable, so the cert is stable)
+#   --force       overwrite existing files — this ROTATES the passwords
+#   --single      the project has ONE namespace named <project>, with no -env
+#                 suffix (docs/onboarding.md §A2, "one namespace only"). Database,
+#                 role and namespace all drop the suffix. Pass NO environments.
+set -euo pipefail
+
+CERT=""
+FORCE=0
+SINGLE=0
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cert)  CERT="${2:-}"; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    --single) SINGLE=1; shift ;;
+    -h|--help) sed -n '2,/^set /p' "$0" | sed '$d'; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; exit 2 ;;
+    *)  ARGS+=("$1"); shift ;;
+  esac
+done
+
+if (( SINGLE )); then
+  if (( ${#ARGS[@]} != 1 )); then
+    echo "usage: $0 --single [--cert FILE] [--force] <project>" >&2
+    echo "--single takes NO environments: the one namespace is <project> itself" >&2
+    exit 2
+  fi
+  PROJECT="${ARGS[0]}"
+  NAMES=("$PROJECT")
+  SCOPE_DESC="single namespace: $PROJECT"
+else
+  if (( ${#ARGS[@]} < 2 )); then
+    echo "usage: $0 [--cert FILE] [--force] <project> <env> [<env>...]" >&2
+    echo "       $0 --single [...] <project>     # one namespace, no -env suffix" >&2
+    exit 2
+  fi
+  PROJECT="${ARGS[0]}"
+  ENVS=("${ARGS[@]:1}")
+  # The namespace, database and role share one name per environment. Everything
+  # below is keyed by it, so --single differs only in how this list is built.
+  NAMES=()
+  for env in "${ENVS[@]}"; do NAMES+=("$PROJECT-$env"); done
+  SCOPE_DESC="environments: ${ENVS[*]}"
+fi
+
+# Same rule as docs/onboarding.md §A1: the name becomes database roles and Azure
+# blob container names, and Azure rejects consecutive hyphens.
+if ! [[ "$PROJECT" =~ ^[a-z0-9]([a-z0-9]|-[a-z0-9])*$ ]] || (( ${#PROJECT} > 58 )); then
+  echo "invalid project name: $PROJECT" >&2
+  echo "lowercase alphanumeric and SINGLE hyphens, start/end alphanumeric, <=58 chars" >&2
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+INFRA_FILE="k8s/infra-manifest/postgres/databases/$PROJECT.yaml"
+PROJ_FILE="k8s/projects/$PROJECT/infra/database.yaml"
+
+if [[ ! -d "k8s/projects/$PROJECT/infra" ]]; then
+  echo "no such project directory: k8s/projects/$PROJECT/infra" >&2
+  echo "run docs/onboarding.md section A first" >&2
+  exit 2
+fi
+
+# Re-running generates NEW passwords. On a live database that rotates the role
+# out from under whatever is connected, so make it deliberate.
+if (( ! FORCE )); then
+  for f in "$INFRA_FILE" "$PROJ_FILE"; do
+    if [[ -e "$f" ]]; then
+      echo "refusing to overwrite $f" >&2
+      echo "pass --force to rotate the passwords for every listed environment" >&2
+      exit 1
+    fi
+  done
+fi
+
+SEAL=(kubeseal --format yaml --scope strict)
+FETCH=(kubeseal --fetch-cert)
+if [[ -n "$CERT" ]]; then
+  SEAL+=(--cert "$CERT")
+  FETCH=(cat "$CERT")
+else
+  for a in --controller-namespace sealed-secrets --controller-name sealed-secrets-controller; do
+    SEAL+=("$a"); FETCH+=("$a")
+  done
+fi
+
+# Fail early and clearly rather than writing half a file.
+if ! "${FETCH[@]}" >/dev/null 2>&1; then
+  echo "cannot reach the sealed-secrets controller (or read --cert)." >&2
+  echo "check KUBECONFIG, or pass --cert with the durable certificate." >&2
+  exit 1
+fi
+
+# The databases dir holds only generated files plus a README; a clone that has
+# never generated one still needs it to exist before the redirection below.
+mkdir -p "$(dirname "$INFRA_FILE")"
+
+HOST="shared-rw.postgres.svc.cluster.local"
+PORT="5432"
+
+# Generate every password up front, in memory, so both files get the same values.
+declare -A PW
+for name in "${NAMES[@]}"; do
+  # Alphanumeric only: the password is embedded UNENCODED in the connection uri,
+  # where a reserved character (@ : / % #) would break it.
+  PW["$name"]="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+done
+
+seal_secret() {   # name namespace type key=value...
+  local name="$1" ns="$2" type="$3"; shift 3
+  local args=()
+  local kv
+  for kv in "$@"; do args+=(--from-literal="$kv"); done
+  kubectl create secret generic "$name" -n "$ns" --type="$type" \
+    "${args[@]}" --dry-run=client -o yaml | "${SEAL[@]}"
+}
+
+# No leading `---`: kubeseal emits its own document separator, and the CNPG
+# heredocs below carry theirs. Two in a row makes an empty document.
+banner() { printf -- '# ---------- %s ----------\n' "$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"; }
+
+{
+  cat <<EOF
+# $PROJECT's databases on the SHARED Postgres server.
+#
+# GENERATED by scripts/new-project-db.sh — do not hand-edit the sealed values.
+# To add an environment or rotate a password, re-run the script.
+#
+# $SCOPE_DESC
+#
+# The role password is a SealedSecret, not a Key Vault reference: onboarding a
+# project must not require an Azure account. It decrypts only in this cluster and
+# only as postgres/postgres-<name>-role.
+#
+# WHY THIS LIVES HERE AND NOT IN k8s/projects/$PROJECT/infra/:
+# CNPG's Database and DatabaseRole reference their Cluster by NAME ONLY
+# (spec.cluster has no namespace field), so both must live in the shared
+# cluster's namespace. Keeping them infra-owned also means a project cannot
+# create objects next to another project's database.
+EOF
+  for name in "${NAMES[@]}"; do
+    banner "$name"
+    # CNPG *consumes* this Secret; it does not generate one. basic-auth required.
+    seal_secret "postgres-$name-role" postgres kubernetes.io/basic-auth \
+      "username=$name" "password=${PW[$name]}"
+    cat <<EOF
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: $name
+  namespace: postgres
+spec:
+  cluster:
+    name: shared
+  ensure: present
+  name: $name
+  login: true
+  passwordSecret:
+    name: postgres-$name-role
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: $name
+  namespace: postgres
+spec:
+  cluster:
+    name: shared
+  ensure: present
+  name: $name
+  owner: $name
+  # retain: dropping the Database resource must not drop the project's data.
+  databaseReclaimPolicy: retain
+EOF
+  done
+} > "$INFRA_FILE"
+
+{
+  cat <<EOF
+# Connection details for $PROJECT's databases on the SHARED Postgres server.
+#
+# GENERATED by scripts/new-project-db.sh — do not hand-edit the sealed values.
+# The passwords here are the SAME ones written into
+# k8s/infra-manifest/postgres/databases/$PROJECT.yaml; regenerate both together.
+#
+# $SCOPE_DESC
+#
+# Each namespace gets a Secret named $PROJECT-db with host, port, dbname,
+# username, password and a ready-made uri. Every field is sealed, because uri
+# embeds the password and the rest are not worth a second mechanism.
+#
+# A project that needs its OWN Postgres instance instead (heavy load, a different
+# major version, an extension the shared server does not carry) can create a CNPG
+# Cluster in this namespace — see docs/postgres.md.
+EOF
+  for name in "${NAMES[@]}"; do
+    banner "$name"
+    seal_secret "$PROJECT-db" "$name" Opaque \
+      "host=$HOST" "port=$PORT" "dbname=$name" "username=$name" \
+      "password=${PW[$name]}" \
+      "uri=postgresql://$name:${PW[$name]}@$HOST:$PORT/$name"
+  done
+} > "$PROJ_FILE"
+
+echo "wrote $INFRA_FILE"
+echo "wrote $PROJ_FILE"
+echo
+echo "${SCOPE_DESC^}"
+echo
+echo "Both files carry the SAME passwords — commit them together."
+echo "No namespace label needed: these are SealedSecrets, not ExternalSecrets."
+echo "Next: docs/onboarding.md, \"Add a database\" step 2."
