@@ -1090,9 +1090,20 @@ sharing *possible*, not advisable.
 Traefik `IngressRoute`, Gateway API `HTTPRoute` or `Gateway` **in a project
 namespace** that claims a host under the infra domain `<HOST>`. Its binding
 selects only namespaces carrying `scouterna.se/project`, so infra's own routes are
-never evaluated. The planned project sub-zone `app.<HOST>` is carved out, so the
-future shared project wildcard is unaffected; a project's own domains
+never evaluated. For `Ingress`, `HTTPRoute` and `Gateway` the check is per-host on
+the structured host field, and the planned project sub-zone `app.<HOST>` is carved
+out so the future shared project wildcard is unaffected. A project's own domains
 (`wsjdev.se`, `scoutid.se`, …) are never in scope.
+
+`IngressRoute` is the exception: its `match` is a free-form Traefik expression, not
+a structured host field, so the rule cannot reason about it host-by-host. It is
+checked fail-closed instead — a project `IngressRoute` whose `match` names `<HOST>`
+in **any** form (any case, and `HostRegexp` too) is rejected outright, with no
+`app.<HOST>` carve-out. A per-host carve-out on a free-form string is unsafe: an
+attacker can append a harmless `app.<HOST>` host to a malicious one to satisfy it.
+A project that needs a host under the sub-zone uses a plain `Ingress`, where the
+carve-out is precise; this is revisited if the `app.<HOST>` scheme ever needs
+`IngressRoute` specifically.
 
 **Why: the shadow reaches the token-validation path, not just a victim's browser.**
 Traefik routes by `Host` across every namespace on one shared entrypoint, and
@@ -1125,8 +1136,9 @@ and review; for hostnames it now rests on admission.
 **Rejected.** *Dropping the routing kinds from the tenant AppProject so infra
 provisions every route* — too much standing load on a volunteer infra team, and it
 does not stop a by-hand apply either. *A HostRegexp allowance for projects* — a
-project has no need to match infra hostnames by regex, and allowing regex reopens
-the shadow; project `IngressRoute`s using `HostRegexp` are therefore rejected too.
+project has no need to match infra hostnames by regex, and a regex host can shadow
+one without ever naming it literally; project `IngressRoute`s using `HostRegexp` are
+therefore rejected outright.
 *Reserving only the exact current infra hostnames* (`dex`, `headlamp`, `grafana`)
 — a new infra app added later would be unprotected until someone remembered to
 extend the list; reserving the whole domain with a project carve-out fails safe

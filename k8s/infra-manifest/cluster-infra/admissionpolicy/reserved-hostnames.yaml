@@ -30,6 +30,8 @@ spec:
       expression: "'app.' + variables.apex"
     - name: projDot
       expression: "'.' + variables.projApex"
+    - name: apexLower
+      expression: "variables.apex.lowerAscii()"
   validations:
     - expression: >-
         request.resource.resource != 'ingresses' || !has(object.spec) || !has(object.spec.rules) ||
@@ -40,9 +42,9 @@ spec:
     - expression: >-
         request.resource.resource != 'ingressroutes' || !has(object.spec) || !has(object.spec.routes) ||
         object.spec.routes.all(r, !has(r.match) ||
-          (!r.match.contains('HostRegexp') &&
-           !(r.match.contains(variables.apex) && !r.match.contains(variables.projApex))))
-      message: "IngressRoute match names the reserved infra domain or uses HostRegexp; project namespaces may not (see docs/decisions.md entry 21)"
+          (!r.match.lowerAscii().contains('hostregexp') &&
+           !r.match.lowerAscii().contains(variables.apexLower)))
+      message: "IngressRoute match references the reserved infra domain (any case) or a host regexp; project namespaces may not (see docs/decisions.md entry 21)"
     - expression: >-
         request.resource.resource != 'httproutes' || !has(object.spec) || !has(object.spec.hostnames) ||
         object.spec.hostnames.all(h,
