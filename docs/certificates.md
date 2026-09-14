@@ -28,7 +28,7 @@ grow:
 
 | Zone | Owner | Example |
 |---|---|---|
-| infra services | infra | `*.$HOST` — `*.ws.scouterna.net` in production, `*.test.ws.scouterna.net` in test |
+| infra services | infra | `*.$HOST` — `*.infra.ws.scouterna.net` in production, `*.infra.test.ws.scouterna.net` in test |
 | shared project wildcard | infra | `*.app.ws.scouterna.net` — *planned* |
 | project-specific | the project | `*.wsjdev.se`, `scoutid.se`, … |
 
@@ -82,12 +82,18 @@ solvers:
 ```
 
 > **Both fields stay `app.ws.scouterna.net`.** Rule 2 above matches a zone *or
-> any subdomain of it*, and the infra hosts (`grafana.ws.scouterna.net`, `dex.`,
-> `headlamp.`) are subdomains of `ws.scouterna.net`. Widening the selector by one
-> label silently moves every infra certificate from HTTP-01 to DNS-01. Giving
-> `app.` its own zone is what keeps the two fields identical, so that mistake
-> reads as a mistake instead of looking like the deliberate asymmetry it would
-> otherwise be.
+> any subdomain of it*, and the infra hosts (`grafana.infra.ws.scouterna.net`,
+> `dex.`, `headlamp.`) are subdomains of `ws.scouterna.net`. Widening the
+> selector by one label silently moves every infra certificate from HTTP-01 to
+> DNS-01. Giving `app.` its own zone is what keeps the two fields identical, so
+> that mistake reads as a mistake instead of looking like the deliberate
+> asymmetry it would otherwise be.
+
+`infra.` and `app.` are **siblings**, not nested: infra publishes under
+`infra.ws.scouterna.net` and projects under `app.ws.scouterna.net`. That is what
+lets admission reserve the whole zone with one carve-out, and what keeps a
+project's own routing objects free of any infra hostname —
+[decisions.md entry 21](decisions.md#21-reserved-hostnames-are-enforced-at-admission).
 
 Adding a zone later is additive — existing certificates keep using HTTP-01,
 untouched.
