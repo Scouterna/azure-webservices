@@ -60,14 +60,20 @@ FEDCRED_ESO=eso-$CLUSTER              # ESO federated-credential name (one per c
 FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one per cluster)
 
 # --- DNS / access ---
-# ZONE is the delegated Azure DNS zone (in $INFRA_RG). The whole zone is reserved
-# for infra EXCEPT $APP_DOMAIN, which is project territory; admission enforces
-# that split in project namespaces — docs/decisions.md entry 22.
-# All three reach the manifests as placeholders, filled in §9a. Setting them here
-# is enough — nothing downstream needs editing by hand.
+# ZONE is the DNS suffix this install reserves: all of it is infra's EXCEPT
+# $APP_DOMAIN, which is project territory, and admission enforces that split in
+# project namespaces — docs/decisions.md entry 22. It is a name, not an Azure
+# resource; the zone that holds the records is $DNS_ZONE below.
+# ZONE, HOST and APP_DOMAIN reach the manifests as placeholders, filled in §9a.
+# Setting them here is enough — nothing downstream needs editing by hand.
 ZONE=ws.scouterna.net             # test: test.ws.scouterna.net
 HOST=infra.$ZONE                  # infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST
 APP_DOMAIN=app.$ZONE              # projects publish here, and nowhere else in $ZONE
+# The delegated Azure DNS zone, in $INFRA_RG — the resource the §11 records are
+# written into, and the SAME zone for every install. A test install reserves
+# test.ws.scouterna.net but its records still live here, as `*.infra.test`:
+# there is no test.ws.scouterna.net zone in Azure. Not a placeholder; §11 only.
+DNS_ZONE=ws.scouterna.net
 
 # --- Subscription (set EXPLICITLY — see the warning below) ---
 SUBSCRIPTION_ID=<the-target-subscription-id>
@@ -1284,8 +1290,43 @@ echo "A    *.$HOST -> $LB_V4"
 echo "AAAA *.$HOST -> $LB_V6"
 ```
 
+One wildcard record set covers every infra host, because they all sit under
+`$HOST`. It is named **relative to `$DNS_ZONE`**, the delegated zone from §0 —
+not relative to `$ZONE`, which for a test install is a reserved suffix with no
+zone of its own:
+
+```bash
+RECORD="*.${HOST%.$DNS_ZONE}"      # production -> *.infra    test -> *.infra.test
+echo "$RECORD"                     # read it before writing to a live zone
+
+az network dns record-set a create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
+az network dns record-set a add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --ipv4-address "$LB_V4"
+
+# add-record APPENDS. On a rebuild the LB address changes, so a stale entry can
+# survive and half of all clients would reach a dead IP. This must print exactly
+# one address, the current one:
+az network dns record-set a show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --query "ARecords[].ipv4Address" -o tsv
+
+# If anything else is listed, drop it (repeat per stale address):
+# az network dns record-set a remove-record -g $INFRA_RG -z $DNS_ZONE \
+#   -n "$RECORD" --ipv4-address <stale-ip> --keep-empty-record-set
+
+dig +short A grafana.$HOST @8.8.8.8      # expect $LB_V4
+```
+
+**The AAAA record is published further down**, after the IPv6 checks — publishing it before v6 is known good stops every certificate on the cluster from issuing.
+
 Both records must exist before cert-manager can complete HTTP-01 challenges from
 IPv6-only validation paths.
+
+> **One delegated zone serves every install.** `$DNS_ZONE` carries one wildcard
+> per cluster, so `add-record` is right and anything that rewrites the zone
+> wholesale is not. A test install therefore writes into the same zone — and the
+> same resource group — as production, which is a deliberate exception to
+> "touch nothing without `test` in the name"; removing those records belongs to
+> tearing that install down.
 
 > **IPv6 is fixed at cluster creation.** `ipFamilies` in `infra/aks.bicep` is
 > immutable — an existing IPv4-only cluster cannot be converted to dual-stack in
@@ -1323,6 +1364,28 @@ IPv6-only validation paths.
 > An empty `$LB_V6` produces `curl: (3) URL using bad/illegal format or missing
 > URL` — that means the assignment block above did not run in this shell (or
 > `KUBECONFIG` was not set), not that IPv6 is broken.
+
+**Now publish the AAAA**, with the v6 address confirmed reachable above:
+
+```bash
+# Re-derived, not inherited: $RECORD was set in the A block, and the checks above
+# assume you may be in a different shell by now. An empty $LB_V6 fails loudly;
+# an empty $RECORD would be an az call with no record-set name, against a live zone.
+RECORD="*.${HOST%.$DNS_ZONE}"; echo "$RECORD"
+
+az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
+az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --ipv6-address "$LB_V6"
+
+# add-record appends here too — exactly one address, the current one:
+az network dns record-set aaaa show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --query "AAAARecords[].ipv6Address" -o tsv
+
+# az network dns record-set aaaa remove-record -g $INFRA_RG -z $DNS_ZONE \
+#   -n "$RECORD" --ipv6-address <stale-ip> --keep-empty-record-set
+
+dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
+```
 
 ---
 
