@@ -57,7 +57,8 @@ PATTERN='<[A-Z][A-Z0-9_]*>'
 # DNS and certificates for a different one.
 EXPECTED=$(cat <<'EOF'
 k8s/argocd/infra-apps/external-secrets.yaml:<ESO_CLIENT_ID>
-k8s/infra-manifest/cluster-infra/admissionpolicy/reserved-hostnames.yaml:<HOST>
+k8s/infra-manifest/cluster-infra/admissionpolicy/reserved-hostnames.yaml:<APP_DOMAIN>
+k8s/infra-manifest/cluster-infra/admissionpolicy/reserved-hostnames.yaml:<ZONE>
 k8s/argocd/infra-apps/velero.yaml:<BACKUP_STORAGE_ACCOUNT>
 k8s/argocd/infra-apps/velero.yaml:<INFRA_RG>
 k8s/argocd/infra-apps/velero.yaml:<NODE_RESOURCE_GROUP>
