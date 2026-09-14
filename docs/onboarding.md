@@ -61,7 +61,7 @@ is excluded.
    grep -rlZ PROJECT "k8s/projects/$PROJECT/" | xargs -0 sed -i "s/PROJECT/$PROJECT/g"
    ```
 
-   **Check it before moving on** — the file list should be 8 files, all under
+   **Check it before moving on** — the file list should be 7 files, all under
    `k8s/projects/$PROJECT/`, and no `PROJECT` may remain:
 
    ```bash
@@ -106,7 +106,8 @@ is excluded.
      ```
      If the project later registers its own GitOps repo, trim `gitops.yaml`'s
      `environments` list to match — an entry naming a namespace that does not
-     exist produces an Application that can never sync.
+     exist produces an Application that can never sync. A database for this
+     project is generated with `--single` for the same reason ("Add a database").
    - **add staging:** copy the namespace file and edit the copy:
      ```bash
      sed "s/dev/staging/g" infra/namespace-dev.yaml > infra/namespace-staging.yaml
@@ -392,8 +393,15 @@ cannot deploy from another project's repo or into another project's namespace.
 Within your namespaces you may create workload kinds: `Deployment`,
 `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `Service`, `Ingress`,
 `NetworkPolicy`, `ConfigMap`, `PersistentVolumeClaim`,
-`HorizontalPodAutoscaler`, `PodDisruptionBudget`, `ServiceMonitor`, and Traefik
-`IngressRoute`/`Middleware`.
+`HorizontalPodAutoscaler`, `PodDisruptionBudget`, `ServiceMonitor`, Traefik
+`IngressRoute`/`Middleware`, and `SealedSecret`.
+
+> **`SealedSecret` is yours to commit.** Seal against this cluster and your own
+> namespace with `kubeseal`, and commit the result to your own repo — the
+> ciphertext is bound to this cluster's key *and* to that namespace and name, so
+> it is useless anywhere else and safe even in a public repo. You do not need
+> infra for a new secret or a rotation. Plain `Secret` is still excluded, so the
+> sealed form is the route.
 
 > **`IngressRoute` cannot cross namespaces.** Traefik runs with
 > `allowCrossNamespace: false`, so a route may only reference Services and
@@ -410,7 +418,7 @@ infra:
 |---|---|
 | `RoleBinding`, `Role` | would let a commit grant itself `admin`/`cluster-admin` |
 | `ServiceAccount` | mints an identity, and a token with it |
-| `Secret`, `SealedSecret` | credentials stay infra-granted; also keeps plaintext out of your Git |
+| `Secret` | keeps plaintext credentials out of your Git history — use `SealedSecret`, which your repo may deploy |
 | `ExternalSecret` | would read any Key Vault secret ESO's identity can reach |
 | ArgoCD `Application` | one with `project: infra` is a complete escape to cluster-admin |
 | CNPG `Cluster`/`Database` | databases are Layer 1, on the shared server |
@@ -534,8 +542,21 @@ an interval.
          remoteRef:
            key: proj-scoutid-smtp-password   # the Key Vault secret name
    ```
-   (See `k8s/infra-manifest/external-secrets/*.yaml` for infra's own examples, and
-   the `ExternalSecret` in `_template/infra/database.yaml.example`.)
+   (See `k8s/infra-manifest/external-secrets/*.yaml` for infra's own examples.)
+
+**Every namespace using an `ExternalSecret` must opt in to the store.** The shared
+`ClusterSecretStore` refuses namespaces without the label, and the only symptom is
+an `ExternalSecret` that never syncs — nothing alerts on it, which is why CI fails
+a project namespace that consumes the store without it. Add this under
+`metadata.labels` in each `namespace-<env>.yaml` that needs it:
+
+```yaml
+scouterna.se/keyvault-access: "true"
+```
+
+Note what it grants: read access to the **whole** vault from that namespace, not
+just this project's keys ([security.md](security.md) §3). Databases no longer
+need it — they use Sealed Secrets.
 
 > **Isolation caveat (be honest about it):** the shared `azure-kv` store is
 > cluster-scoped, so an `ExternalSecret` in *any* namespace can reference *any* KV
@@ -621,119 +642,78 @@ instance — most projects here are small, and a dedicated instance per project
 reserves far more than it uses. See [postgres.md](postgres.md) for the design and
 for when a project should get its own instance instead.
 
-Two commits are involved, because CNPG resolves `spec.cluster` by name within a
-namespace: the `Database` and `DatabaseRole` must live beside the shared cluster
-(infra-owned), while the connection Secret goes in the project's namespace.
+**Two files, one password.** The role and the database are infra-owned and live
+beside the shared cluster, because CNPG resolves `spec.cluster` by name and has no
+namespace field. The connection Secret lives in the project's namespaces. Both
+carry the same password, so `scripts/new-project-db.sh` generates them together
+rather than leaving you to keep them in step.
 
-1. **Infra: create the databases.** Generate a password per environment into Key
-   Vault, then copy the template and commit.
+**The password is sealed into Git, not stored in Key Vault.** Onboarding a project
+needs a GitHub account and cluster access, which the infra team already has through
+Dex, and no Azure or Entra account. Key Vault stays the store for install-time
+infra secrets. See [decisions.md](decisions.md).
 
-   **Set `ENVS` to this project's actual environments** — the template and the
-   loops below assume `dev prod`, but §A2 makes that set flexible. Add `staging`
-   if the project has one; drop `prod` if it does not. `$PROJECT` comes from §A1
-   and must still be set in this shell:
-
-   ```bash
-   echo "PROJECT=$PROJECT"          # empty? re-run: export PROJECT=<project name>
-   ENVS="dev prod"                  # adjust to match this project's namespaces
-
-   for env in $ENVS; do
-     az keyvault secret set --vault-name kv-scouterna-webservices \
-       --name "postgres-$PROJECT-$env-password" \
-       --value "$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)" >/dev/null
-   done
-
-   # Confirm one secret per environment before moving on — a wrong or empty
-   # $PROJECT produces a plausible name that fails much later, at sync time.
-   az keyvault secret list --vault-name kv-scouterna-webservices \
-     --query "[?starts_with(name,'postgres-$PROJECT-')].name" -o tsv
-
-   cd "$(git rev-parse --show-toplevel)/k8s/infra-manifest/postgres/databases"
-   sed "s/PROJECT/$PROJECT/g" _template.yaml.example > "$PROJECT.yaml"
-   ```
-   That file holds, **for dev and for prod**, an `ExternalSecret` (the role
-   password, from Key Vault), a `DatabaseRole`, and a `Database` owned by it.
-   Each environment gets its own role, so a leaked dev credential cannot reach
-   prod data.
-
-   **If `ENVS` is not `dev prod`, edit `$PROJECT.yaml` now** — add or delete
-   whole blocks so it matches. Then commit; the `postgres-databases` app applies
-   it:
+1. **Generate both files.** `$PROJECT` comes from §A1. List this project's
+   environments exactly as §A2 created them — the script loops over what you pass,
+   so there is no template to hand-edit and no `dev prod` assumption to miss:
 
    ```bash
    cd "$(git rev-parse --show-toplevel)"
-   git add "k8s/infra-manifest/postgres/databases/$PROJECT.yaml"
-   git diff --cached                    # check the names before pushing
+   ENVS="dev prod"                                   # match §A2; add staging etc.
+   scripts/new-project-db.sh "$PROJECT" $ENVS        # unquoted: one arg per env
+   ```
+
+   > **One namespace only?** If §A2 collapsed this project to a single namespace
+   > named `$PROJECT`, run `scripts/new-project-db.sh --single "$PROJECT"` and
+   > verify with `-n "$PROJECT"` in step 3 — the database, role and namespace all
+   > drop the `-env` suffix. Passing environments instead seals the Secret to
+   > `$PROJECT-<env>`, which does not exist, and `--scope strict` binds the
+   > ciphertext to that name: it could never be unsealed in `$PROJECT`.
+
+   > **Re-running rotates the passwords.** It refuses to overwrite existing files
+   > for that reason; `--force` is the deliberate way to rotate, and it changes the
+   > live role password for every environment listed.
+
+   > **Sealing needs the controller's certificate**, fetched from the cluster by
+   > default. `--cert <file>` seals with no cluster access at all: the sealing key
+   > is durable, so the certificate is stable across rebuilds.
+
+2. **Check and commit.** The sealed values are opaque, so check the names — they
+   are what a mistake shows up in:
+
+   ```bash
+   git status --short                   # exactly the two generated files
+   grep -c '^kind: Database$' "k8s/infra-manifest/postgres/databases/$PROJECT.yaml"
+   grep -c '^kind: SealedSecret$' "k8s/projects/$PROJECT/infra/database.yaml"
+   ```
+
+   Both counts must equal the number of environments you passed. Then commit both
+   together — they share a password and are meaningless apart:
+
+   ```bash
+   git add "k8s/infra-manifest/postgres/databases/$PROJECT.yaml" \
+           "k8s/projects/$PROJECT/infra/database.yaml"
    git commit -m "Add $PROJECT databases on the shared server"
-   ```
-
-   > **Single-namespace project** (§A2's "one namespace only", where the
-   > namespace is just `$PROJECT` with no suffix): the env suffix is part of
-   > every name in the template, so it cannot be looped away. Use
-   > `ENVS="dev"` for the loop above, then in `$PROJECT.yaml` delete the prod
-   > block and strip `-dev` from the names in what remains — and rename the Key
-   > Vault secret to match (`postgres-$PROJECT-password`), since the loop created
-   > it with the `-dev` suffix.
-
-2. **Project: materialize the credentials.** In the project's own directory:
-   ```bash
-   cd "$(git rev-parse --show-toplevel)/k8s/projects/$PROJECT/infra"
-   git mv database.yaml.example database.yaml
-   ```
-   It produces a Secret named `$PROJECT-db` **in each namespace** — with `host`,
-   `port`, `dbname`, `username`, `password` and a ready-made `uri`, each pointing
-   at that environment's own database.
-
-   **Then grant those namespaces access to the store.** The shared
-   `ClusterSecretStore` refuses namespaces that do not opt in. In
-   `k8s/projects/$PROJECT/infra/`, add this line under `metadata.labels` in
-   `namespace-<env>.yaml`, for **each** environment getting a database:
-
-   ```yaml
-   scouterna.se/keyvault-access: "true"
-   ```
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)/k8s/projects/$PROJECT/infra"
-   grep -l 'keyvault-access' namespace-*.yaml    # expect one line per env in $ENVS
-   ```
-
-   Skip it and the `ExternalSecret` simply never syncs — nothing alerts on that
-   today, which is why CI fails a project namespace that consumes the store
-   without the label. Note what the label grants: read access to the **whole**
-   vault from that namespace, not just this project's password
-   ([security.md](security.md) §3).
-
-   Commit it, then **push both commits** — ArgoCD syncs from the remote, so an
-   unpushed commit changes nothing in the cluster:
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)"
-   git add "k8s/projects/$PROJECT/infra/database.yaml" \
-           "k8s/projects/$PROJECT/infra/"namespace-*.yaml
-   git status --short                   # the rename, plus one M per labelled namespace
-   git commit -m "Materialize $PROJECT database credentials"
    git push
    ```
 
-   > **dev + prod is the default**, matching the namespaces in §A2. For a single
-   > environment, delete the prod block from **both** files and drop the `-dev`
-   > suffix in what remains; for staging, copy a block in each and change the
-   > suffix. Remember the matching Key Vault password either way.
+   ArgoCD syncs from the remote, so an unpushed commit changes nothing in the
+   cluster — and the symptom is indistinguishable from a failed sync.
+
 
 3. **Verify** — the database and role exist, and the project's Secret is synced.
    Uses the same `$ENVS` set from step 1:
    ```bash
    kubectl get database,databaserole -n postgres | grep "$PROJECT"   # one pair per env
    for env in $ENVS; do
-     kubectl get externalsecret -n "$PROJECT-$env"                   # READY=True
+     kubectl get sealedsecret -n "$PROJECT-$env"                     # SYNCED=True
      kubectl get secret -n "$PROJECT-$env" "$PROJECT-db" \
        -o jsonpath='{.data.dbname}' | base64 -d; echo                # PROJECT-<env>
    done
    ```
    **Empty output usually means an unpushed commit, not a broken database.**
    Nothing exists in the cluster until ArgoCD reads it from the remote, and the
-   symptom — no `Database`, no `ExternalSecret` — looks identical to a failed
+   symptom — no `Database`, no `SealedSecret` — looks identical to a failed
    sync. Check that first:
 
    ```bash
@@ -809,8 +789,8 @@ cd "$(git rev-parse --show-toplevel)/k8s/projects/$PROJECT/infra"
 cp app-state-rbac.yaml.example app-state-rbac.yaml   # dropping .example is what makes it sync
 ```
 
-Replace `PROJECT` and `APP` throughout. The template ships **dev and prod**, like
-`database.yaml.example` — RBAC does not cross namespaces, so each environment
+Replace `PROJECT` and `APP` throughout. The template ships **dev and prod** —
+RBAC does not cross namespaces, so each environment
 needs its own ServiceAccount, Role and RoleBinding. A single-namespace project
 deletes the prod half; a project with staging copies one. The template's
 `resourceNames` confines the app to its own object; leave it in place.

@@ -93,7 +93,7 @@ solvers:
 `infra.ws.scouterna.net` and projects under `app.ws.scouterna.net`. That is what
 lets admission reserve the whole zone with one carve-out, and what keeps a
 project's own routing objects free of any infra hostname —
-[decisions.md entry 21](decisions.md#21-reserved-hostnames-are-enforced-at-admission).
+[decisions.md entry 22](decisions.md#22-reserved-hostnames-are-enforced-at-admission).
 
 Adding a zone later is additive — existing certificates keep using HTTP-01,
 untouched.

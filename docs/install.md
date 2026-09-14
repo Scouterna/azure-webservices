@@ -62,7 +62,7 @@ FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one pe
 # --- DNS / access ---
 # ZONE is the delegated Azure DNS zone (in $INFRA_RG). The whole zone is reserved
 # for infra EXCEPT $APP_DOMAIN, which is project territory; admission enforces
-# that split in project namespaces — docs/decisions.md entry 21.
+# that split in project namespaces — docs/decisions.md entry 22.
 # All three reach the manifests as placeholders, filled in §9a. Setting them here
 # is enough — nothing downstream needs editing by hand.
 ZONE=ws.scouterna.net             # test: test.ws.scouterna.net

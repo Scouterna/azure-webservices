@@ -1,6 +1,6 @@
 # Reserve the DNS zone (<ZONE>) for infra, except project territory
 # (<APP_DOMAIN>). Rationale, threat and the rejected alternatives:
-# docs/decisions.md entry 21. Both are filled mechanically in docs/install.md §9a.
+# docs/decisions.md entry 22. Both are filled mechanically in docs/install.md §9a.
 #
 # A project route must NAME a host. A route that names none matches every host,
 # and router priority is tenant-settable — see the entry.
@@ -48,12 +48,12 @@ spec:
          object.spec.rules.all(r, has(r.host) &&
            (r.host == variables.app || r.host.endsWith(variables.appDot) ||
             !(r.host == variables.zone || r.host.endsWith(variables.zoneDot)))))
-      message: "Ingress in a project namespace must name a host in every rule and must not set defaultBackend, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
+      message: "Ingress in a project namespace must name a host in every rule and must not set defaultBackend, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 22)"
       messageExpression: >-
         'Ingress in a project namespace must name a host in every rule and must not ' +
         'set defaultBackend, and inside ' +
         variables.zone + ' only ' + variables.app + ' is project territory ' +
-        '(see docs/decisions.md entry 21)'
+        '(see docs/decisions.md entry 22)'
     # Traefik's match is a free-form expression, so this is fail-closed: one
     # named host per route, no alternation, no negation, no regexp. A project
     # needing several hosts writes several routes.
@@ -67,22 +67,22 @@ spec:
            r.match.lowerAscii().split('`').all(tok,
              !(tok == variables.zone || tok.endsWith(variables.zoneDot)) ||
               (tok == variables.app || tok.endsWith(variables.appDot)))))
-      message: "IngressRoute in a project namespace must match exactly one named host, without ||, ! or HostRegexp, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
+      message: "IngressRoute in a project namespace must match exactly one named host, without ||, ! or HostRegexp, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 22)"
       messageExpression: >-
         'IngressRoute in a project namespace must match one named Host() per route ' +
         '(no ||, no !, no HostRegexp), and inside ' + variables.zone + ' only ' +
-        variables.app + ' is project territory (see docs/decisions.md entry 21)'
+        variables.app + ' is project territory (see docs/decisions.md entry 22)'
     - expression: >-
         request.resource.resource != 'httproutes' ||
         (has(object.spec) && has(object.spec.hostnames) && object.spec.hostnames.size() > 0 &&
          object.spec.hostnames.all(h, h.lowerAscii() == variables.app ||
            h.lowerAscii().endsWith(variables.appDot) ||
            !(h.lowerAscii() == variables.zone || h.lowerAscii().endsWith(variables.zoneDot))))
-      message: "HTTPRoute in a project namespace must name a hostname, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
+      message: "HTTPRoute in a project namespace must name a hostname, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 22)"
       messageExpression: >-
         'HTTPRoute in a project namespace must name at least one hostname, and inside ' +
         variables.zone + ' only ' + variables.app + ' is project territory ' +
-        '(see docs/decisions.md entry 21)'
+        '(see docs/decisions.md entry 22)'
     - expression: >-
         request.resource.resource != 'gateways' ||
         (has(object.spec) && has(object.spec.listeners) &&
@@ -91,11 +91,11 @@ spec:
             l.hostname.lowerAscii().endsWith(variables.appDot) ||
             !(l.hostname.lowerAscii() == variables.zone ||
               l.hostname.lowerAscii().endsWith(variables.zoneDot)))))
-      message: "Gateway listener in a project namespace must name a hostname, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 21)"
+      message: "Gateway listener in a project namespace must name a hostname, and inside the infra zone only project territory is allowed (see docs/decisions.md entry 22)"
       messageExpression: >-
         'every Gateway listener in a project namespace must name a hostname, and inside ' +
         variables.zone + ' only ' + variables.app + ' is project territory ' +
-        '(see docs/decisions.md entry 21)'
+        '(see docs/decisions.md entry 22)'
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

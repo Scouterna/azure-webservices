@@ -16,8 +16,9 @@ ApplicationSet syncs this `infra/` directory automatically once committed.
   what they forbid. CI rejects a project namespace committed without them.
 - `developer-rbac.yaml.example` → rename to `developer-rbac.yaml`. Binds a
   GitHub team (or user) to `admin` within the project's namespaces.
-- `database.yaml.example` → rename to `database.yaml` if the project needs a
-  database on the shared PostgreSQL server.
+- `database.yaml` → **generated**, if the project needs a database on the shared
+  PostgreSQL server. Run `scripts/new-project-db.sh <project> <env>...`; it writes
+  this file and the matching infra-side one with the same sealed password.
 - `sealedsecret-*.yaml` — committed sealed secrets, if any.
 
 Only filenames matching the ApplicationSet's `include:` glob are applied. **A

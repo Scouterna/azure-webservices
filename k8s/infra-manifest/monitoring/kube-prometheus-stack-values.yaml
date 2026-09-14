@@ -115,6 +115,18 @@ grafana:
       jsonData:
         timeInterval: 30s
 
+# API-server SLO burn-rate rules. Disabled for the same reason as the three
+# components below: AKS runs the API server, so these are for operators of a
+# self-managed control plane. kube-apiserver-burnrate.rules also evaluated for
+# 57s against a 30s interval on an 11h-old cluster, re-reading the whole TSDB
+# continuously and saturating the Prometheus disk. docs/decisions.md entry 11.
+# Slos too, not just Burnrate: its KubeAPIErrorBudgetBurn alerts read the
+# burn-rate recordings, so leaving them on would keep alerts that can never fire.
+defaultRules:
+  rules:
+    kubeApiserverBurnrate: false
+    kubeApiserverSlos: false
+
 # AKS does not expose the controller manager or the scheduler, and Cilium
 # replaces kube-proxy, so all three Services sit with zero endpoints and their
 # *Down rules fire forever. docs/decisions.md entry 11.
