@@ -57,22 +57,20 @@ database.
 
 ## Adding a database
 
-1. Put a generated password in Key Vault **per environment** — dev and prod get
-   separate roles, so a leaked dev credential cannot reach prod data:
+1. Generate both manifests. One password per environment is created, sealed, and
+   written into the infra file and the project file together:
+
    ```bash
-   for env in dev prod; do
-     az keyvault secret set --vault-name kv-scouterna-webservices \
-       --name "postgres-<project>-$env-password" \
-       --value "$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)" >/dev/null
-   done
+   scripts/new-project-db.sh <project> dev prod      # list the real environments
    ```
-2. Copy `k8s/infra-manifest/postgres/databases/_template.yaml.example` to
-   `<project>.yaml`, replace `PROJECT`, commit. The `postgres-databases` app
-   applies it.
-3. In the project's own directory, activate
-   `infra/database.yaml.example` → `infra/database.yaml` (see
-   [onboarding.md](onboarding.md)). That materializes the connection Secret into
-   the project's namespace.
+
+   The password is a **SealedSecret**, not a Key Vault key, so this needs a GitHub
+   account and cluster access and no Azure account. See
+   [onboarding.md](onboarding.md) for the full flow.
+2. Commit both files. The `postgres-databases` app applies the infra half; the
+   project's own app applies the connection Secret.
+3. Rotating: re-run with `--force`. That changes the live role password, so do it
+   deliberately.
 4. Verify:
    ```bash
    kubectl get database,databaserole -n postgres

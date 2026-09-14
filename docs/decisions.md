@@ -30,6 +30,7 @@ say why rather than deleting it.
 | [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
 | [19](#19-metric-retention-is-sized-from-a-measured-rate-and-0-is-not-unlimited) | Metric retention is sized from a measured rate, and `0` is not unlimited | current |
 | [20](#20-a-test-cluster-that-outlives-its-install-gets-its-own-durable-resources) | A test cluster that outlives its install gets its own durable resources | current |
+| [21](#21-a-project-may-commit-its-own-sealedsecrets-plain-secret-stays-out) | A project may commit its own `SealedSecret`s; plain `Secret` stays out | current |
 
 ---
 
@@ -1078,3 +1079,49 @@ the test cluster lives. Both are deleted with its resource group.
 **Authentication is not a reason to share.** A managed identity accepts many
 federated credentials, so one identity could serve both clusters. That makes
 sharing *possible*, not advisable.
+
+## 21. A project may commit its own `SealedSecret`s; plain `Secret` stays out
+
+**Current.** The per-project GitOps AppProject permits `bitnami.com/SealedSecret`
+in the project's own namespaces. `Secret` remains excluded, as do
+`ExternalSecret`, `ServiceAccount`, `RoleBinding`/`Role`, ArgoCD `Application`
+and the CNPG kinds.
+
+**Why the rule was narrower than its own reasoning.** The excluded list is
+justified by one sentence covering both kinds at once: credentials stay
+infra-granted, and plaintext stays out of the project's Git. Run each excluded
+kind against the ownership principle — a project owns its namespaces as long as
+it does not risk other projects or the infra structure — and they do not all
+answer the same way. `ExternalSecret` reaches every key in a cluster-wide vault.
+`ServiceAccount` reaches infra's Azure identities. An `Application` with
+`project: infra` is cluster-admin in one file. A CNPG `Database` lands on the
+server every project shares. Those four protect someone else.
+
+`SealedSecret` protects nobody. Its ciphertext is bound to this cluster's key
+*and* to its own namespace and name, which is the property that makes sealed
+secrets safe to commit to a public repo at all. `project-infra.yaml` already
+cited exactly that property as the reason to permit it, while the project-GitOps
+template cited the same mechanism as a reason to forbid it, calling it "minting
+Secrets indirectly" — which is only a restatement that the project can create a
+secret for itself, in its own namespace.
+
+**What it cost.** Because the sealed route ran only through
+`k8s/projects/<project>/infra/`, which only infra can commit, every secret a
+project added or rotated after onboarding needed a commit to a repo infra owns.
+Not once at onboarding — for the life of the project, for something carrying no
+cross-project risk. The infra team is a small volunteer group whose model is to
+onboard a project and then leave it alone, and this worked directly against that.
+
+**Why plain `Secret` still stays out.** Not because it reaches anyone else — it
+does not, and [entry 8](#8-a-namespace-is-a-security-boundary-the-appproject-is-not-the-only-one)
+notes that plain `admin` RBAC already permits it on the by-hand route, so the
+AppProject only closes the GitOps half. It stays excluded because committing
+plaintext credentials should be a deliberate act, not something that arrives
+through the same sync as everything else. Blocking it costs infra nothing
+ongoing, because `SealedSecret` is the mechanism a project would actually use.
+
+**Still open.** Developer RBAC additions have the same recurring-commit shape and
+were not changed here. `RoleBinding` is the one excluded kind that can hand a
+project's access to another person's identity, which is a stronger reason to keep
+infra in that loop — but it is worth deciding deliberately rather than by
+inheriting this one.
