@@ -1,0 +1,70 @@
+# Reserve the infra domain (<HOST>) for infra namespaces. Rationale, threat and
+# the carve-out for the planned project sub-zone: docs/decisions.md entry 21.
+# <HOST> is filled mechanically in docs/install.md §9a.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: reserved-hostnames
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["ingresses"]
+      - apiGroups: ["traefik.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["ingressroutes"]
+      - apiGroups: ["gateway.networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["httproutes", "gateways"]
+  variables:
+    - name: apex
+      expression: "'<HOST>'"
+    - name: infraDot
+      expression: "'.' + variables.apex"
+    - name: projApex
+      expression: "'app.' + variables.apex"
+    - name: projDot
+      expression: "'.' + variables.projApex"
+  validations:
+    - expression: >-
+        request.resource.resource != 'ingresses' || !has(object.spec) || !has(object.spec.rules) ||
+        object.spec.rules.all(r, !has(r.host) ||
+          !((r.host == variables.apex || r.host.endsWith(variables.infraDot)) &&
+            !(r.host == variables.projApex || r.host.endsWith(variables.projDot))))
+      message: "Ingress host is under the reserved infra domain; project namespaces may not claim it (see docs/decisions.md entry 21)"
+    - expression: >-
+        request.resource.resource != 'ingressroutes' || !has(object.spec) || !has(object.spec.routes) ||
+        object.spec.routes.all(r, !has(r.match) ||
+          (!r.match.contains('HostRegexp') &&
+           !(r.match.contains(variables.apex) && !r.match.contains(variables.projApex))))
+      message: "IngressRoute match names the reserved infra domain or uses HostRegexp; project namespaces may not (see docs/decisions.md entry 21)"
+    - expression: >-
+        request.resource.resource != 'httproutes' || !has(object.spec) || !has(object.spec.hostnames) ||
+        object.spec.hostnames.all(h,
+          !((h == variables.apex || h.endsWith(variables.infraDot)) &&
+            !(h == variables.projApex || h.endsWith(variables.projDot))))
+      message: "HTTPRoute hostname is under the reserved infra domain; project namespaces may not claim it (see docs/decisions.md entry 21)"
+    - expression: >-
+        request.resource.resource != 'gateways' || !has(object.spec) || !has(object.spec.listeners) ||
+        object.spec.listeners.all(l, !has(l.hostname) ||
+          !((l.hostname == variables.apex || l.hostname.endsWith(variables.infraDot)) &&
+            !(l.hostname == variables.projApex || l.hostname.endsWith(variables.projDot))))
+      message: "Gateway listener hostname is under the reserved infra domain; project namespaces may not claim it (see docs/decisions.md entry 21)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: reserved-hostnames-projects
+spec:
+  policyName: reserved-hostnames
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: scouterna.se/project
+          operator: Exists

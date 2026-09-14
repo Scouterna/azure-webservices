@@ -30,6 +30,7 @@ say why rather than deleting it.
 | [18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one) | Persistent state has four tiers, and a disk is the last one | current |
 | [19](#19-metric-retention-is-sized-from-a-measured-rate-and-0-is-not-unlimited) | Metric retention is sized from a measured rate, and `0` is not unlimited | current |
 | [20](#20-a-test-cluster-that-outlives-its-install-gets-its-own-durable-resources) | A test cluster that outlives its install gets its own durable resources | current |
+| [21](#21-reserved-hostnames-are-enforced-at-admission) | Reserved hostnames are enforced at admission | current, amends 8 |
 
 ---
 
@@ -205,8 +206,11 @@ not match exactly. `admin` permits `RoleBinding`, `Role`, `ServiceAccount` and
 
 **What follows.** The excluded-kinds table in [onboarding.md](onboarding.md) is a
 statement of ownership, not purely a technical fence: creating those by hand is out
-of bounds and gets reverted. Closing the gap technically would need a
-`ValidatingAdmissionPolicy`, which is not deployed.
+of bounds and gets reverted. Closing *that* gap technically would need a
+`ValidatingAdmissionPolicy`, and none is deployed for those kinds — for a
+`RoleBinding` or `Secret` created by hand, RBAC plus review is still the boundary.
+One `ValidatingAdmissionPolicy` **is** now deployed, for a narrower and
+higher-severity gap: reserving the infra hostnames (entry 21).
 
 ## 9. Audit logging is `kube-audit-admin` only, capped, and off-cluster
 
@@ -1078,3 +1082,57 @@ the test cluster lives. Both are deleted with its resource group.
 **Authentication is not a reason to share.** A managed identity accepts many
 federated credentials, so one identity could serve both clusters. That makes
 sharing *possible*, not advisable.
+
+## 21. Reserved hostnames are enforced at admission
+
+**Current.** A `ValidatingAdmissionPolicy` (`reserved-hostnames`,
+`k8s/infra-manifest/cluster-infra/admissionpolicy/`) rejects any `Ingress`,
+Traefik `IngressRoute`, Gateway API `HTTPRoute` or `Gateway` **in a project
+namespace** that claims a host under the infra domain `<HOST>`. Its binding
+selects only namespaces carrying `scouterna.se/project`, so infra's own routes are
+never evaluated. The planned project sub-zone `app.<HOST>` is carved out, so the
+future shared project wildcard is unaffected; a project's own domains
+(`wsjdev.se`, `scoutid.se`, …) are never in scope.
+
+**Why: the shadow reaches the token-validation path, not just a victim's browser.**
+Traefik routes by `Host` across every namespace on one shared entrypoint, and
+router priority is by rule length — both tenant-settable
+([traefik/values.yaml](../k8s/infra-manifest/traefik/values.yaml),
+[the tenant AppProject](../k8s/argocd/projects/_project-gitops.yaml.example)
+whitelists `Ingress` and `IngressRoute`). A tenant route for
+``Host(`dex.<HOST>`) && PathPrefix(`/keys`)`` outranks Dex's `/` route, and TLS
+needs no attacker certificate because Traefik terminates by SNI against the real
+`dex-tls` already in its store. The API server fetches
+`https://dex.<HOST>/.well-known/openid-configuration` and then
+`https://dex.<HOST>/keys` to validate every Dex token
+([jwtauthenticator/dex.json](../infra/jwtauthenticator/dex.json)), so a hijacked
+`/keys` lets a tenant serve its own JWKS and mint a self-signed token with
+`groups: ["Scouterna:Webservices Infra"]` — the group bound to cluster-admin.
+That is a tenant→cluster-admin escalation with **no victim and no GitOps**, only a
+`kubectl apply` with the `admin` role. The same shadow also intercepts a real
+admin's `id_token` at `headlamp.<HOST>`/`grafana.<HOST>` (the originally
+identified risk).
+
+**Why in-cluster admission, and not the guardrail first agreed.** The agreed
+mitigation was a reserved-hostname check shipped in a future project
+starter-template, running in each project's own repo CI. That does not defend the
+by-hand `kubectl apply` path, and this repo's CI cannot see project routes at all
+(projects deploy from their own GitOps repos or by hand). Only in-cluster
+admission enforces on every path. This **amends entry 8**, which recorded that no
+`ValidatingAdmissionPolicy` was deployed and that the by-hand gap rested on RBAC
+and review; for hostnames it now rests on admission.
+
+**Rejected.** *Dropping the routing kinds from the tenant AppProject so infra
+provisions every route* — too much standing load on a volunteer infra team, and it
+does not stop a by-hand apply either. *A HostRegexp allowance for projects* — a
+project has no need to match infra hostnames by regex, and allowing regex reopens
+the shadow; project `IngressRoute`s using `HostRegexp` are therefore rejected too.
+*Reserving only the exact current infra hostnames* (`dex`, `headlamp`, `grafana`)
+— a new infra app added later would be unprotected until someone remembered to
+extend the list; reserving the whole domain with a project carve-out fails safe
+for hosts nobody has thought of yet.
+
+**Cost, accepted.** The first admission policy in the cluster. It is CEL only, no
+webhook and no controller to run or keep alive, so it adds no failure mode of its
+own beyond `failurePolicy: Fail` on the four route kinds in project namespaces —
+which is the intended behaviour.

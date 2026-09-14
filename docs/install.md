@@ -764,14 +764,15 @@ identifiers, not secrets — safe to commit.
 ### 9a. `<HOST>` and `<CLUSTER>` — fill these mechanically
 
 Both are already set from §0, so neither needs a lookup and neither should be
-edited by hand: `<HOST>` alone appears 13 times across four files.
+edited by hand: `<HOST>` alone appears 14 times across five files.
 
 ```bash
 # Every occurrence, in one pass. Run from the repo root.
 grep -rlZ -e '<HOST>' -e '<CLUSTER>' k8s/ \
   | xargs -0 sed -i -e "s#<HOST>#$HOST#g" -e "s#<CLUSTER>#$CLUSTER#g"
 
-git diff --stat    # expect: dex, headlamp x2, kube-prometheus-stack, alloy
+git diff --stat    # expect: dex, headlamp x2, kube-prometheus-stack, alloy,
+                   # cluster-infra/admissionpolicy/reserved-hostnames
 ```
 
 `<HOST>` becomes the ingress host, the TLS host, Grafana's `root_url`, Dex's
