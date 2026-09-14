@@ -1368,6 +1368,11 @@ IPv6-only validation paths.
 **Now publish the AAAA**, with the v6 address confirmed reachable above:
 
 ```bash
+# Re-derived, not inherited: $RECORD was set in the A block, and the checks above
+# assume you may be in a different shell by now. An empty $LB_V6 fails loudly;
+# an empty $RECORD would be an az call with no record-set name, against a live zone.
+RECORD="*.${HOST%.$DNS_ZONE}"; echo "$RECORD"
+
 az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
 az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
   --ipv6-address "$LB_V6"
