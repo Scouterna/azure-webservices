@@ -60,18 +60,19 @@ FEDCRED_ESO=eso-$CLUSTER              # ESO federated-credential name (one per c
 FEDCRED_VELERO=velero-$CLUSTER        # Velero federated-credential name (one per cluster)
 
 # --- DNS / access ---
-# ZONE is the delegated Azure DNS zone (in $INFRA_RG). The whole zone is reserved
-# for infra EXCEPT $APP_DOMAIN, which is project territory; admission enforces
-# that split in project namespaces — docs/decisions.md entry 22.
-# All three reach the manifests as placeholders, filled in §9a. Setting them here
-# is enough — nothing downstream needs editing by hand.
+# ZONE is the DNS suffix this install reserves: all of it is infra's EXCEPT
+# $APP_DOMAIN, which is project territory, and admission enforces that split in
+# project namespaces — docs/decisions.md entry 22. It is a name, not an Azure
+# resource; the zone that holds the records is $DNS_ZONE below.
+# ZONE, HOST and APP_DOMAIN reach the manifests as placeholders, filled in §9a.
+# Setting them here is enough — nothing downstream needs editing by hand.
 ZONE=ws.scouterna.net             # test: test.ws.scouterna.net
 HOST=infra.$ZONE                  # infra apps: grafana.$HOST, headlamp.$HOST, dex.$HOST
 APP_DOMAIN=app.$ZONE              # projects publish here, and nowhere else in $ZONE
-# The Azure DNS zone that actually holds the records (§11). NOT the same thing as
-# $ZONE: a test install reserves test.ws.scouterna.net but its records still live
-# in the delegated ws.scouterna.net zone, as `*.infra.test`. There is no
-# test.ws.scouterna.net zone in Azure.
+# The delegated Azure DNS zone, in $INFRA_RG — the resource the §11 records are
+# written into, and the SAME zone for every install. A test install reserves
+# test.ws.scouterna.net but its records still live here, as `*.infra.test`:
+# there is no test.ws.scouterna.net zone in Azure. Not a placeholder; §11 only.
 DNS_ZONE=ws.scouterna.net
 
 # --- Subscription (set EXPLICITLY — see the warning below) ---
@@ -1302,6 +1303,16 @@ az network dns record-set a create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 
 az network dns record-set a add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
   --ipv4-address "$LB_V4"
 
+# add-record APPENDS. On a rebuild the LB address changes, so a stale entry can
+# survive and half of all clients would reach a dead IP. This must print exactly
+# one address, the current one:
+az network dns record-set a show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --query "ARecords[].ipv4Address" -o tsv
+
+# If anything else is listed, drop it (repeat per stale address):
+# az network dns record-set a remove-record -g $INFRA_RG -z $DNS_ZONE \
+#   -n "$RECORD" --ipv4-address <stale-ip> --keep-empty-record-set
+
 dig +short A grafana.$HOST @8.8.8.8      # expect $LB_V4
 ```
 
@@ -1313,6 +1324,13 @@ certificate on the cluster from issuing while IPv4 looks healthy:
 az network dns record-set aaaa create -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" --ttl 300
 az network dns record-set aaaa add-record -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
   --ipv6-address "$LB_V6"
+
+# Same append behaviour here — exactly one address, the current one:
+az network dns record-set aaaa show -g $INFRA_RG -z $DNS_ZONE -n "$RECORD" \
+  --query "AAAARecords[].ipv6Address" -o tsv
+
+# az network dns record-set aaaa remove-record -g $INFRA_RG -z $DNS_ZONE \
+#   -n "$RECORD" --ipv6-address <stale-ip> --keep-empty-record-set
 
 dig +short AAAA grafana.$HOST @8.8.8.8   # expect $LB_V6
 ```
