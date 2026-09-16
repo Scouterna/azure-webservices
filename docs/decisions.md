@@ -32,6 +32,7 @@ say why rather than deleting it.
 | [20](#20-a-test-cluster-that-outlives-its-install-gets-its-own-durable-resources) | A test cluster that outlives its install gets its own durable resources | current |
 | [21](#21-a-project-may-commit-its-own-sealedsecrets-plain-secret-stays-out) | A project may commit its own `SealedSecret`s; plain `Secret` stays out | current |
 | [22](#22-reserved-hostnames-are-enforced-at-admission) | Reserved hostnames are enforced at admission | current, amends 8 |
+| [23](#23-the-files-shared-account-key-is-kept-out-of-tenant-namespaces) | The `files-shared` account key is kept out of tenant namespaces | current |
 
 ---
 
@@ -1262,3 +1263,50 @@ own beyond `failurePolicy: Fail` on the four route kinds in project namespaces �
 which is the intended behaviour. Projects also lose Traefik's more expressive
 match syntax (alternation, negation, regexp hosts) on `IngressRoute`; one route
 per host is the supported shape.
+
+## 23. The `files-shared` account key is kept out of tenant namespaces
+
+**Current.** The `files-shared` StorageClass
+([`storageclass/files-shared.yaml`](../k8s/infra-manifest/cluster-infra/storageclass/files-shared.yaml))
+sets `secretNamespace: kube-system`, so the Azure Files account key the CSI driver
+writes for each provisioned share lands in `kube-system`, not in the PVC's own
+namespace.
+
+**Why.** Without it, `file.csi.azure.com` writes the key to a Secret named
+`azure-storage-account-<name>-secret` **in the PVC's namespace** (the driver's
+default), where a project's `admin` can read it. That key is **account-wide** and
+bypasses Azure RBAC, and the driver reuses one storage account for every
+`files-shared` PVC in the resource group ([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)
+is the tier). So one project could read the key from its own namespace and reach,
+overwrite or delete **every other project's** share over the Files data plane —
+the tier's neutral-name portability was fine, its isolation was not. Moving the key
+to `kube-system` removes that read path: a namespace `admin` has no access there,
+and the CSI node plugin mounts as a cluster component, so shares still mount.
+
+**Residual, accepted.** One account-wide key still exists, in `kube-system`, and
+the shared account is reachable over its public endpoint. Reaching the key now
+requires `kube-system` (i.e. the node), and on a single-node cluster node access is
+already total compromise — the same premise [security.md](security.md) §1 sets out,
+not a new exposure. The account is created in the node resource group by default,
+so its contents do **not** survive a cluster teardown; `files-shared` is for
+regenerable state, and durable data belongs in the shared PostgreSQL or a backed-up
+tier.
+
+**Rejected: per-project storage accounts.** Would need one StorageClass per project
+(the class pins at most one `storageAccount`, which must pre-exist) or a per-project
+`storageAccount` threaded through the project template plus a Bicep-created account
+each — real standing machinery on a volunteer infra team, for a tier no project uses
+yet. Deferred until a project needs it.
+
+**Rejected for now: no key at all.** `storeAccountKey: false` (the node's kubelet
+identity fetches the key at mount) or full Azure Files Workload Identity
+(`Storage File Data SMB Share` role, no key Secret anywhere) removes the standing
+credential entirely. Both need a role grant to the node/workload identity and
+test-cluster verification; this is the right closure **when the tier gets real
+use**, and is the escalation from this entry rather than a competing choice.
+
+**Verify on a test cluster** (positive criteria): provision a `files-shared` PVC in
+a project namespace, then `kubectl get secret -n <project-ns> -l ...` (or by the
+`azure-storage-account-<name>-secret` name) returns **NotFound**, and the same
+secret **exists in `kube-system`**; a second PVC in a second namespace mounts and
+reads/writes its own share.

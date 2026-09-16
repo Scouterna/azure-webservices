@@ -5,6 +5,8 @@ metadata:
 provisioner: file.csi.azure.com
 parameters:
   skuName: Standard_LRS
+  # Account key lands here, not the tenant's namespace — docs/decisions.md entry 23.
+  secretNamespace: kube-system
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
