@@ -3,8 +3,11 @@ kind: StorageClass
 metadata:
   name: files-shared
 provisioner: file.csi.azure.com
+# Immutable: changing parameters on a live cluster needs `kubectl delete sc` — docs/decisions.md entry 23.
 parameters:
   skuName: Standard_LRS
+  # Account key lands here, not the tenant's namespace — docs/decisions.md entry 23.
+  secretNamespace: kube-system
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
