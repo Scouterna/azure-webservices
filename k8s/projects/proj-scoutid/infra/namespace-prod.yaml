@@ -1,13 +1,12 @@
-# Dev namespace for the project.
+# Prod namespace for the project.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: proj-scoutid
+  name: proj-scoutid-prod
   labels:
     scouterna.se/project: proj-scoutid
-    # Pod Security Admission — without these the namespace is unprotected and
-    # nothing reports it. Rationale: docs/security.md. Bumping enforce-version
-    # after an AKS upgrade: docs/maintenance.md.
+    scouterna.se/env: prod
+    # Same level as dev on purpose — see docs/security.md.
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/warn: restricted
