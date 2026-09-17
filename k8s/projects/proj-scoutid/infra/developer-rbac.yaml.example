@@ -1,0 +1,71 @@
+# Developer / team access for this project. Copy to developer-rbac.yaml (drop the
+# .example) to activate it — the .example is never synced.
+#
+# Developers authenticate via GitHub SSO (Dex + AKS structured auth): a developer
+# IS their GitHub identity. There is NO ServiceAccount and NO token to hand out.
+# Access = a RoleBinding binding a GitHub identity into each namespace. Two kinds
+# of subject, and you can mix both in this file:
+#
+#   - kind: Group  "aks:jwt:<org>:<Team Display Name>"  — a whole GitHub TEAM
+#       RECOMMENDED for real teams: membership is then managed in GitHub (add /
+#       remove people from the team) with no cluster change or commit.
+#   - kind: User   "aks:jwt:<github-login>"             — a single developer
+#       For one-off / individual access.
+#
+# Use ClusterRole `admin` for full control within the namespace, or `view` for
+# read-only. Add one RoleBinding PER NAMESPACE the team/developer should access
+# (a dev/prod project needs a binding in each).
+#
+# The team string uses the display name VERBATIM (spaces included) and fails
+# silently if wrong. Read it from a real token instead of guessing:
+#   kubectl auth whoami -o json | grep aks:jwt
+# See docs/onboarding.md section B.
+---
+# TEAM access (recommended) — bind a GitHub team to this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: TEAM-team-admin
+  namespace: proj-scoutid-dev           # must match a namespace-*.yaml in this dir
+subjects:
+  - kind: Group
+    name: "aks:jwt:Scouterna:TEAM" # the GitHub team display name, verbatim
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin                      # or `view`
+  apiGroup: rbac.authorization.k8s.io
+---
+# Same team, prod namespace. A RoleBinding is namespaced and does NOT cross
+# namespaces, so each one needs its own. The name may repeat — RoleBinding names
+# only have to be unique within a namespace.
+# (Single-namespace project? Delete this block and use proj-scoutid in the one above.)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: TEAM-team-admin
+  namespace: proj-scoutid-prod
+subjects:
+  - kind: Group
+    name: "aks:jwt:Scouterna:TEAM"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin                      # or `view` — prod is a fair place to use view
+  apiGroup: rbac.authorization.k8s.io
+---
+# INDIVIDUAL access — bind a single developer. Delete this block if you only use
+# team access; duplicate it per (developer, namespace) as needed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: GITHUB_LOGIN-admin
+  namespace: proj-scoutid-dev
+subjects:
+  - kind: User
+    name: "aks:jwt:GITHUB_LOGIN"   # the developer's GitHub login, lowercased
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin                      # or `view`
+  apiGroup: rbac.authorization.k8s.io
