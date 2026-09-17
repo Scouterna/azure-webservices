@@ -727,9 +727,14 @@ users:
           - --oidc-extra-scope=email
           - --oidc-extra-scope=groups
           - --oidc-extra-scope=offline_access
+          - --skip-open-browser
         interactiveMode: IfAvailable
 EOF
 ```
+
+> **Keep `--skip-open-browser`.** Without it the plugin tries to launch a browser
+> itself, which fails where there is no graphical environment (WSL). It still
+> needs a browser — it prints the URL instead of opening it.
 
 Generating it here is fine — the server address and CA come from the running
 cluster. **It cannot be tested yet:** it authenticates through Dex, which is
