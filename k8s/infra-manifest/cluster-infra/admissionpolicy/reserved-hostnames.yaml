@@ -1,5 +1,5 @@
-# Reserve the DNS zone (<ZONE>) for infra, except project territory
-# (<APP_DOMAIN>). Rationale, threat and the rejected alternatives:
+# Reserve the DNS zone (ws.scouterna.net) for infra, except project territory
+# (app.ws.scouterna.net). Rationale, threat and the rejected alternatives:
 # docs/decisions.md entry 22. Both are filled mechanically in docs/install.md §9a.
 #
 # A project route must NAME a host. A route that names none matches every host,
@@ -26,14 +26,14 @@ spec:
         resources: ["httproutes", "gateways"]
   variables:
     # The whole delegated zone is reserved; infra's own hosts sit under
-    # infra.<ZONE>, so nothing here needs to know their names.
+    # infra.ws.scouterna.net, so nothing here needs to know their names.
     - name: zone
-      expression: "'<ZONE>'"
+      expression: "'ws.scouterna.net'"
     - name: zoneDot
       expression: "'.' + variables.zone"
     # Project territory: a sibling of infra's hosts, not a nested exception.
     - name: app
-      expression: "'<APP_DOMAIN>'"
+      expression: "'app.ws.scouterna.net'"
     - name: appDot
       expression: "'.' + variables.app"
   validations:

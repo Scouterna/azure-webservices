@@ -16,7 +16,7 @@ replicaCount: 1
 # $GITHUB_CLIENT_SECRET (injected from the ESO-managed secret). The chart
 # supports Go-template expansion of env vars in the config when envVars are set.
 config:
-  issuer: https://dex.<HOST>
+  issuer: https://dex.infra.ws.scouterna.net
 
   # Signing keys live here. With `memory` a restart rotates them and invalidates
   # every issued token. docs/decisions.md entry 16.
@@ -45,9 +45,9 @@ config:
       id: github
       name: GitHub
       config:
-        clientID: <DEX_GITHUB_CLIENT_ID>          # Dex's own GitHub OAuth App (client id is public)
+        clientID: Ov23lilHmnnGon0lvdWl          # Dex's own GitHub OAuth App (client id is public)
         clientSecret: $GITHUB_CLIENT_SECRET         # expanded from env (ESO secret)
-        redirectURI: https://dex.<HOST>/callback
+        redirectURI: https://dex.infra.ws.scouterna.net/callback
         orgs:
           - name: Scouterna
         # Use the GitHub login (not the numeric id or name) as the username so
@@ -68,7 +68,7 @@ config:
     - id: headlamp
       name: Headlamp
       redirectURIs:
-        - https://headlamp.<HOST>/oidc-callback
+        - https://headlamp.infra.ws.scouterna.net/oidc-callback
       secretEnv: HEADLAMP_CLIENT_SECRET             # expanded from env (ESO secret)
     # kubectl via int128/kubelogin (kubectl oidc-login). A PUBLIC client (no
     # secret — it is a CLI on a user's laptop, can't keep one) using PKCE.
@@ -104,14 +104,14 @@ ingress:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     acme.cert-manager.io/http01-ingress-class: traefik
   hosts:
-    - host: dex.<HOST>
+    - host: dex.infra.ws.scouterna.net
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: dex-tls
       hosts:
-        - dex.<HOST>
+        - dex.infra.ws.scouterna.net
 
 resources:
   requests:

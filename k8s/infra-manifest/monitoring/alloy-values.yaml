@@ -75,7 +75,7 @@ alloy:
 
         stage.static_labels {
           values = {
-            cluster = "<CLUSTER>",
+            cluster = "webservices-v2",
           }
         }
 
@@ -102,7 +102,7 @@ alloy:
         // cluster must match the pod-log pipeline above.
         stage.static_labels {
           values = {
-            cluster = "<CLUSTER>",
+            cluster = "webservices-v2",
           }
         }
 

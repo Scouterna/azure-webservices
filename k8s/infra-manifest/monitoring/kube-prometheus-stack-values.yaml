@@ -29,27 +29,27 @@ grafana:
       cert-manager.io/cluster-issuer: "letsencrypt-prod"
       acme.cert-manager.io/http01-ingress-class: "traefik"
     hosts:
-      - grafana.<HOST>
+      - grafana.infra.ws.scouterna.net
     path: /
     tls:
       - secretName: grafana-tls
         hosts:
-          - grafana.<HOST>
+          - grafana.infra.ws.scouterna.net
 
   grafana.ini:
     server:
-      domain: grafana.<HOST>
-      root_url: https://grafana.<HOST>
+      domain: grafana.infra.ws.scouterna.net
+      root_url: https://grafana.infra.ws.scouterna.net
 
     # Daily login = GitHub OAuth, restricted to the Scouterna org.
     # Create a GitHub OAuth App (Scouterna org -> Settings -> Developer settings
-    # -> OAuth Apps): Homepage https://grafana.<HOST>,
-    # callback https://grafana.<HOST>/login/github.
+    # -> OAuth Apps): Homepage https://grafana.infra.ws.scouterna.net,
+    # callback https://grafana.infra.ws.scouterna.net/login/github.
     # Put the Client ID below; the Client Secret comes from the mounted secret
     # (GF_AUTH_GITHUB_CLIENT_SECRET__FILE above), not this file.
     auth.github:
       enabled: true
-      client_id: <GRAFANA_GITHUB_CLIENT_ID>
+      client_id: Ov23liPCdudf5ZnyQqW3
       scopes: user:email,read:org
       auth_url: https://github.com/login/oauth/authorize
       token_url: https://github.com/login/oauth/access_token

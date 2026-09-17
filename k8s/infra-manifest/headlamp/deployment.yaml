@@ -28,10 +28,10 @@ spec:
             - "-plugins-dir=/headlamp/plugins"
             - "-session-ttl=86400"
             - "-oidc-client-id=headlamp"
-            - "-oidc-idp-issuer-url=https://dex.<HOST>"
+            - "-oidc-idp-issuer-url=https://dex.infra.ws.scouterna.net"
             # offline_access: refresh token. groups: GitHub teams for RBAC.
             - "-oidc-scopes=openid,profile,email,offline_access,groups"
-            - "-oidc-callback-url=https://headlamp.<HOST>/oidc-callback"
+            - "-oidc-callback-url=https://headlamp.infra.ws.scouterna.net/oidc-callback"
             # $(VAR) is expanded by the kubelet from `env` below, not a shell.
             - "-oidc-client-secret=$(OIDC_CLIENT_SECRET)"
           env:

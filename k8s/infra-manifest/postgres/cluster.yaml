@@ -20,7 +20,7 @@ spec:
     name: backup-storage-key
     template:
       data:
-        AZURE_STORAGE_ACCOUNT: <BACKUP_STORAGE_ACCOUNT>
+        AZURE_STORAGE_ACCOUNT: stwsv2backup
         AZURE_STORAGE_KEY: "{{ .storageKey }}"
   data:
     - secretKey: storageKey
@@ -34,7 +34,7 @@ metadata:
   namespace: postgres
 spec:
   configuration:
-    destinationPath: "https://<BACKUP_STORAGE_ACCOUNT>.blob.core.windows.net/cnpg-shared"
+    destinationPath: "https://stwsv2backup.blob.core.windows.net/cnpg-shared"
     azureCredentials:
       storageAccount:
         name: backup-storage-key
