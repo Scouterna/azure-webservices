@@ -1305,8 +1305,30 @@ credential entirely. Both need a role grant to the node/workload identity and
 test-cluster verification; this is the right closure **when the tier gets real
 use**, and is the escalation from this entry rather than a competing choice.
 
-**Verify on a test cluster** (positive criteria): provision a `files-shared` PVC in
-a project namespace, then `kubectl get secret -n <project-ns> -l ...` (or by the
-`azure-storage-account-<name>-secret` name) returns **NotFound**, and the same
-secret **exists in `kube-system`**; a second PVC in a second namespace mounts and
-reads/writes its own share.
+**Upgrading a cluster that already has `files-shared`: delete the class once.**
+StorageClass `parameters` are immutable, so ArgoCD cannot apply this change to an
+existing class. The `cluster-infra` sync fails on that one resource with
+`parameters: ... field is immutable` and keeps retrying, while the app shows only
+`OutOfSync` and a sync that stays `Running`. After the change is on the branch
+ArgoCD reads:
+
+```bash
+kubectl delete storageclass files-shared    # ArgoCD recreates it within seconds
+kubectl get storageclass files-shared -o jsonpath='{.parameters}'   # expect secretNamespace
+```
+
+Deleting a StorageClass does not touch existing PVs or PVCs. It also does **not**
+move their keys: the driver writes the secret's namespace into each volume's ID at
+provisioning time, so a volume created before this change keeps its key in the
+tenant's namespace until it is re-provisioned. A fresh install needs none of this.
+The same applies to any later change to any StorageClass's `parameters`.
+
+**Verified live on the test cluster (2026-09-17, driver v1.35.6).** The immutable
+failure and the delete-and-recreate above were both observed. One `files-shared`
+PVC each in `proj-wsj27-dev` and `proj-wsj27-staging` shared a **single** storage
+account, confirming the premise. The one key Secret existed only in `kube-system`,
+and neither project namespace held one. Both PVs recorded `kube-system` as their
+secret namespace, and each pod read and wrote its own share. `kubectl auth can-i`
+as the project's group returned `no` for the key Secret, for listing secrets
+cluster-wide, and for reading PVs. To re-verify, repeat that and check
+`kubectl get secret -A | grep azure-storage-account` lists `kube-system` only.
