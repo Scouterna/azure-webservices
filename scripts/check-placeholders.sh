@@ -11,19 +11,21 @@
 #     "<VELERO_CLIENT_ID>", or ESO pointing at
 #     "https://<KEY_VAULT_NAME>.vault.azure.net/".
 #
-#   --expect-template  for THIS repo's main in CI. The placeholders are supposed
-#     to still be there; what must never land is a real value committed over one.
-#     Catches both a filled-in Azure identifier leaking onto the public repo and a
-#     placeholder accidentally deleted.
+#   --expect-template  for a clone that is still an UNFILLED template. The
+#     placeholders are supposed to still be there; what must never land is a real
+#     value committed over one. Catches both a filled-in Azure identifier leaking
+#     onto the public repo and a placeholder accidentally deleted.
+#     NOT what CI runs any more: main now carries the live install's real values
+#     (2026-09-17), so this direction can no longer hold there.
 #
 # Placeholders inside comments are ignored (they document what to fill in), as
 # are *.example files, which exist to be copied.
 #
 # Usage:
-#   scripts/check-placeholders.sh --expect-template          # CI on main
-#   scripts/check-placeholders.sh --expect-template --staged # pre-commit hook (INDEX)
-#   scripts/check-placeholders.sh --expect-filled            # operator, pre-bootstrap
+#   scripts/check-placeholders.sh --expect-filled            # CI on main; operator, pre-bootstrap
 #   scripts/check-placeholders.sh --expect-filled origin/main  # ...against a pushed ref
+#   scripts/check-placeholders.sh --expect-template          # an unfilled template clone
+#   scripts/check-placeholders.sh --expect-template --staged # pre-commit hook (INDEX)
 set -euo pipefail
 
 # Pathspecs below are cwd-relative; anchor at the repo root so the script works

@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # main is the TEMPLATE: the placeholders belong here. This fails if a real
-      # Azure identifier is committed over one, or a placeholder is deleted.
-      - name: Placeholder template intact
-        run: scripts/check-placeholders.sh --expect-template
+      # main carries the live install's values. This fails if a placeholder is
+      # left unfilled — ArgoCD would report Synced/Healthy and fail at runtime.
+      - name: Placeholders filled
+        run: scripts/check-placeholders.sh --expect-filled
 
   manifests:
     runs-on: ubuntu-latest
