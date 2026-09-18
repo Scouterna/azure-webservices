@@ -1,0 +1,46 @@
+# Wires a project's OWN GitOps repo into ArgoCD. INFRA-OWNED: this file lives in
+# the infra repo and only infra commits it. It is the one-time registration —
+# after this the project commits to its own repo and never touches this one.
+#
+# Rename to gitops.yaml to activate. Without it a project simply has no ArgoCD
+# registration and installs by hand, which is a perfectly normal end state.
+#
+# What this generates (see k8s/argocd/projects-root/gitops-appset.yaml):
+#   - ONE AppProject named <project>, scoped to THIS repo and THIS project's
+#     namespaces only, and
+#   - one Application per environment listed below.
+#
+# What the project may deploy is deliberately limited to workload kinds. It
+# CANNOT create RoleBinding, ServiceAccount, Secret, ExternalSecret, ArgoCD
+# Applications, or CNPG databases — those stay infra-granted via infra/.
+# See docs/onboarding.md.
+
+# Must match the directory name under k8s/projects/ and the namespace prefix.
+project: proj-wsj27
+
+# The project's own GitOps repo. Must be an exact URL — it becomes the sole
+# entry in the generated AppProject's sourceRepos.
+# PUBLIC repos need no credential. A PRIVATE repo additionally needs an ArgoCD
+# repository credential whose URL SCHEME matches this one (see docs/onboarding.md).
+repoURL: https://github.com/Scouterna/proj-wsj27-gitops.git
+
+# Branch or tag ArgoCD tracks.
+revision: main
+
+# One entry per environment. `name` must match the namespace suffix, so `dev`
+# targets namespace proj-wsj27-dev — which infra/namespace-dev.yaml must create.
+#
+# `path` is the directory INSIDE the project's repo holding that environment's
+# manifests (plain YAML or a Helm chart; ArgoCD detects which).
+#
+# `automated` true  → ArgoCD applies and self-heals; the cluster always matches Git.
+#             false → ArgoCD reports drift but changes nothing until a deliberate
+#                     sync. Lets the project keep hand-editing; note a later sync
+#                     DISCARDS those edits (see docs/argocd.md).
+environments:
+  - name: dev
+    path: k8s/dev
+    automated: false
+  - name: prod
+    path: k8s/prod
+    automated: true
