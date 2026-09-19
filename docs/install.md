@@ -727,9 +727,14 @@ users:
           - --oidc-extra-scope=email
           - --oidc-extra-scope=groups
           - --oidc-extra-scope=offline_access
+          - --skip-open-browser
         interactiveMode: IfAvailable
 EOF
 ```
+
+> **Keep `--skip-open-browser`.** Without it the plugin tries to launch a browser
+> itself, which fails where there is no graphical environment (WSL). It still
+> needs a browser — it prints the URL instead of opening it.
 
 Generating it here is fine — the server address and CA come from the running
 cluster. **It cannot be tested yet:** it authenticates through Dex, which is
@@ -1567,11 +1572,12 @@ exist. Now it does, and DNS resolves:
 kubectl --kubeconfig k8s/access/oidc-kubeconfig get nodes
 ```
 
-This opens a browser for GitHub login the first time. Success proves the whole
-developer path: Dex issues the token, the API server's JWTAuthenticator accepts
-its audience, and RBAC grants the access. `Unauthorized` here usually means
-`kubectl` is missing from the JWTAuthenticator's `audiences` (§11) — run
-`kubectl oidc-login clean` after fixing it, to drop the cached rejected token.
+This prints a URL to open for GitHub login the first time (the kubeconfig sets
+`--skip-open-browser`). Success proves the whole developer path: Dex issues the
+token, the API server's JWTAuthenticator accepts its audience, and RBAC grants
+the access. `Unauthorized` here usually means `kubectl` is missing from the
+JWTAuthenticator's `audiences` (§11) — run `kubectl oidc-login clean` after
+fixing it, to drop the cached rejected token.
 
 There is deliberately **no ArgoCD endpoint** — see the next section.
 

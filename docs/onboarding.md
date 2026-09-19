@@ -227,23 +227,31 @@ RoleBindings grant.
 1. Install the `kubectl oidc-login` plugin ([int128/kubelogin][kubelogin] — note
    this is **not** the Azure `kubelogin`):
    ```bash
-   kubectl krew install oidc-login          # if you have krew
+   brew install kubelogin                   # Homebrew's plain name IS int128's
+   kubectl krew install oidc-login          # alternative, if you have krew
    ```
-   No krew? Download the release binary for your OS from the [kubelogin
+   Homebrew's `kubelogin` formula is int128's despite the name clash; the wrong
+   one is the tap, `brew install Azure/kubelogin/kubelogin`. `kubectl krew` needs
+   [krew][krew] installed first — plain kubectl has no `krew` command.
+
+   Neither? Download the release binary for your OS from the [kubelogin
    releases][kubelogin] and put it on your `PATH` as `kubectl-oidc_login`
    (kubectl discovers `kubectl-<name>` binaries as the `kubectl <name>` plugin).
 2. Get the shared **OIDC kubeconfig** from the infra team (or the repo). It
    contains no secrets — the cluster address, the public CA, and an `exec` block
    that runs `kubectl oidc-login` against Dex. It is **identical for every
    developer**; identity is established at login time.
-3. Run any `kubectl` command. The first one opens a browser for GitHub login;
-   the token is then cached and silently refreshed (a browser login roughly
+3. Run any `kubectl` command. The first one prints a URL to open for GitHub
+   login; the token is then cached and silently refreshed (a fresh login roughly
    weekly). Example:
    ```bash
    kubectl get pods -n <namespace>          # works within granted namespaces
    ```
+   Open the URL on the **same machine** — the login redirects back to a local
+   port. `k8s/access/README.md` covers the case where you cannot.
 
 [kubelogin]: https://github.com/int128/kubelogin
+[krew]: https://krew.sigs.k8s.io/docs/user-guide/setup/install/
 
 ### Grafana (metrics and logs)
 
