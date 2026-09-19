@@ -497,6 +497,42 @@ explicit companion:
   the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
   labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
 
+**The group evaluates every 5 minutes, not every 30 seconds** (`interval: 5m` on
+`platform-controls`), added 2026-09-19 after `NodeDiskIOSaturation` fired twice in
+one day on the Prometheus TSDB volume. This is the same failure the API-server SLO
+rules produced above, with one difference worth keeping: the expensive rule was
+**ours**.
+
+`VeleroBackupMetricsAbsent` cost **0.754s per evaluation at rest and 27s at peak —
+roughly 50x the next most expensive rule in the instance**, which is 0.014s. The
+`prometheus` container read **1.5 TB in 24 hours** from a 1.7 GB TSDB, peaking at
+940 read IOPS and 196 MB/s against a disk provisioned for 500 and 100.
+
+**The cost is block count, not data.** The selector matches two series and 5,439
+samples; scanning that is free. But the Thanos sidecar means Prometheus does no
+higher-level compaction, so the TSDB is a flat pile of ~57 MB two-hour blocks, and
+a 48h range selector opens roughly **24 separate block indexes** — every 30
+seconds. The second episode began when the TSDB turned 48h old and the window
+filled with its maximum block count: TSDB growth again, not load, exactly as with
+the API-server rules. Nothing had changed; the rule was untouched since install.
+
+Shortening the window was the alternative and was rejected: the 48h is doing real
+work, and the reasoning above for why it is 48h and not longer still holds. The
+interval is the free variable — nothing here is faster than `for: 5m`, so 30s
+resolution was buying nothing. `VeleroBackupFailing` now needs two evaluations to
+fire and so is reported within ~10 minutes rather than ~5; that is acceptable for
+a backup failure and is the only detection delay this adds.
+
+**What should have caught it, and still does not.** All three rounds were found by
+an alert firing and being investigated by hand. `platform-controls` reached 27s
+against its own 30s interval — it was nearly missing its schedule, and nothing
+watches for that. `prometheus_rule_group_last_duration_seconds` against
+`prometheus_rule_group_interval_seconds` would have caught all three early, and
+this file is the obvious place for it. Left open rather than added in the same
+change. When reading that metric, check
+`time() - prometheus_rule_group_last_evaluation_timestamp_seconds` first: a stale
+sample reads as a group still running.
+
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
 fires on every fresh install, which is correct — no backup has succeeded, so the
 backup path really is blind — but the `critical` route repeats every hour, so a
