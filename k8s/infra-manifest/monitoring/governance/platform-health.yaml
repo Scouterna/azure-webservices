@@ -12,6 +12,9 @@ metadata:
 spec:
   groups:
     - name: platform-controls
+      # 5m, not the chart's 30s: VeleroBackupMetricsAbsent's 48h window costs
+      # ~0.75s/eval, and no rule here is faster than for: 5m. decisions.md entry 11.
+      interval: 5m
       rules:
         - alert: ExternalSecretNotReady
           # A stalled ExternalSecret keeps serving the LAST synced value, so the
