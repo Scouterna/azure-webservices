@@ -1572,11 +1572,12 @@ exist. Now it does, and DNS resolves:
 kubectl --kubeconfig k8s/access/oidc-kubeconfig get nodes
 ```
 
-This opens a browser for GitHub login the first time. Success proves the whole
-developer path: Dex issues the token, the API server's JWTAuthenticator accepts
-its audience, and RBAC grants the access. `Unauthorized` here usually means
-`kubectl` is missing from the JWTAuthenticator's `audiences` (§11) — run
-`kubectl oidc-login clean` after fixing it, to drop the cached rejected token.
+This prints a URL to open for GitHub login the first time (the kubeconfig sets
+`--skip-open-browser`). Success proves the whole developer path: Dex issues the
+token, the API server's JWTAuthenticator accepts its audience, and RBAC grants
+the access. `Unauthorized` here usually means `kubectl` is missing from the
+JWTAuthenticator's `audiences` (§11) — run `kubectl oidc-login clean` after
+fixing it, to drop the cached rejected token.
 
 There is deliberately **no ArgoCD endpoint** — see the next section.
 
