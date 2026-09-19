@@ -902,13 +902,13 @@ The work that does **not** exist yet, and is the real cost:
 **The strongest argument for building it is the billing model, not the API.**
 Its cost is the PVC underneath it — fixed, and paid once by the platform. S3
 calls against it are in-cluster traffic and cost nothing per operation, whereas
-`files-shared` bills every write and list ([entry
-16](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)). For a
-write-heavy project on a centrally-paid cluster that difference is the whole
-decision: a workload that would cost tens of euros a month on `files-shared`
-costs nothing extra here beyond the disk already provisioned. It also puts a
-single reviewable number on the shared bill instead of a per-project variable one
-nobody is watching.
+`files-shared` bills every write and list
+([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)).
+For a write-heavy project on a centrally-paid cluster that difference is the
+whole decision: a workload that would cost tens of euros a month on
+`files-shared` costs nothing extra here beyond the disk already provisioned. It
+also puts a single reviewable number on the shared bill instead of a per-project
+variable one nobody is watching.
 
 **Where it sits in the four tiers ([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)): it is not a fifth tier, it is a
 narrower one.** For "somewhere to keep files" the answer stays `files-shared` — it
