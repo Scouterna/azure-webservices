@@ -847,8 +847,10 @@ spec:
       storage: 1Gi
 ```
 
-Mount it as usual. It is backed up by Velero along with the rest of your
-namespace (see below) — no extra step.
+Mount it as usual. **It is not backed up.** Velero snapshots `disk-*` volumes but
+not Azure Files (see the Velero note below), so a `files-shared` PVC holds
+regenerable state only — anything you cannot lose belongs in the shared PostgreSQL
+or a `disk-*` PVC. See `decisions.md` entry 23.
 
 **Why this one does not cost a disk.** `files-shared` is backed by
 `file.csi.azure.com` — an SMB share over the network, not a block device
@@ -885,7 +887,7 @@ needed.** Velero runs two schedules (`k8s/infra-manifest/velero/schedules/`):
 
 | Schedule | What | When | Retention |
 |---|---|---|---|
-| `daily-projects` | every project namespace (all except infra ns), **incl. PVC data** | 02:00 daily | 14 days |
+| `daily-projects` | every project namespace (all except infra ns), **incl. `disk-*` PVC data** | 02:00 daily | 14 days |
 | `weekly-full` | the whole cluster (all namespaces) as a safety net | 03:00 Sundays | 90 days |
 
 So a project asking "please back up my PVC" already has it: their namespace and
@@ -898,6 +900,10 @@ in the durable backup storage account (external to the cluster).
 > it, backups capture namespace/object state but **not** volume contents. (The
 > weekly full backup may report `PartiallyFailed` on a few un-snapshottable
 > cluster resources — that's expected; it's a best-effort safety net.)
+>
+> **The only such class is for `disk.csi.azure.com`**, so `disk-*` PVCs are
+> captured and **`files-shared` (Azure Files) volumes are not** — treat a
+> `files-shared` PVC as regenerable state (`decisions.md` entry 23).
 
 > **`kubectl get volumesnapshot` returns nothing after a successful backup — do
 > not read that as failure.** Velero deletes the temporary `VolumeSnapshot`
