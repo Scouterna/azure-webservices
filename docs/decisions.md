@@ -912,7 +912,10 @@ nobody is watching.
 
 **Where it sits in the four tiers ([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)): it is not a fifth tier, it is a
 narrower one.** For "somewhere to keep files" the answer stays `files-shared` — it
-is already RWX, already backed up, and costs no attached disk. A project-facing
+is already RWX and costs no attached disk. **It is not backed up, though**: Velero
+captures `disk-*` volume contents only, so a `files-shared` PVC holds regenerable
+state (entry 23). This sentence said "already backed up" until 2026-09-19, which
+was wrong in the one direction that costs a project data. A project-facing
 object store is only the right answer when the application genuinely speaks S3:
 an SDK, presigned URLs, versioned objects, or a library that has no filesystem
 mode. That is a real requirement when it appears, and it is the *only* case that
