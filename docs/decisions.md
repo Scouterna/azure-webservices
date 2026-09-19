@@ -523,15 +523,48 @@ resolution was buying nothing. `VeleroBackupFailing` now needs two evaluations t
 fire and so is reported within ~10 minutes rather than ~5; that is acceptable for
 a backup failure and is the only detection delay this adds.
 
-**What should have caught it, and still does not.** All three rounds were found by
-an alert firing and being investigated by hand. `platform-controls` reached 27s
-against its own 30s interval — it was nearly missing its schedule, and nothing
-watches for that. `prometheus_rule_group_last_duration_seconds` against
-`prometheus_rule_group_interval_seconds` would have caught all three early, and
-this file is the obvious place for it. Left open rather than added in the same
-change. When reading that metric, check
-`time() - prometheus_rule_group_last_evaluation_timestamp_seconds` first: a stale
-sample reads as a group still running.
+**What should have caught it — `PrometheusRuleGroupExpensive`.** All three rounds
+were found by an alert firing and being investigated by hand, so
+`governance/platform-health.yaml` now watches the rule engine's own cost.
+
+**The obvious form of that rule does not work, and this entry said otherwise
+until it was measured.** Comparing duration to interval and alerting near 1.0
+catches rounds one and two (ratios 1.9 and 0.83) and **misses round three
+entirely**: over the 14h before the fix, `platform-controls` had a median ratio
+of **0.024** and never once exceeded **0.35**. A threshold at 0.5 would have sat
+silent through the whole incident. The peak of 27s was a symptom of the saturated
+disk, not the signal — by then the alert had already fired.
+
+What separates the states is the **sustained** duty cycle, `avg_over_time` of the
+duration over an hour divided by the interval — the fraction of wall-clock the
+group spends evaluating, which is what actually drives disk reads:
+
+| | sustained duty cycle |
+|---|---|
+| `platform-controls`, before the fix | **0.0346** |
+| `platform-controls`, after | 0.0033 |
+| busiest other group on this cluster | 0.0007 |
+
+So the threshold is **0.01**: 3.5x under the broken state, 3x over the fixed one,
+14x over the noisiest healthy group. Rounds one and two clear it by 80-190x.
+Verified by evaluating the expression at a timestamp before the fix, where it
+returns exactly one series and names the right group.
+
+It is deliberately **not** a peak alert. The chart's
+`PrometheusMissingRuleEvaluations` already covers a group overrunning far enough
+to skip an iteration, and `PrometheusRuleFailures` covers one timing out — the
+acute cases. Neither fired during round three: iterations missed and evaluation
+failures were both **zero** for the whole incident, because a group can dominate
+the disk for hours without ever missing its schedule. That gap is the whole
+reason this rule exists.
+
+The second clause is a staleness guard: a group that stopped being evaluated
+keeps its last duration sample, and
+`time() - prometheus_rule_group_last_evaluation_timestamp_seconds` is what
+distinguishes that from a group still running. Reading the duration without it
+once turned a stale 89s sample into a false conclusion.
+
+The rule costs ~0.001s per evaluation against the 0.754s it exists to find.
 
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
 fires on every fresh install, which is correct — no backup has succeeded, so the
