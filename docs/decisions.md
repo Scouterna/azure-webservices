@@ -465,9 +465,21 @@ nothing about this platform's own controls, all of which fail quietly:
 |---|---|
 | `ExternalSecretNotReady` | The Secret keeps serving its last synced value, so the workload runs fine until a rotation or rebuild |
 | `VeleroBackupFailing` | Backups erroring; only matters when a restore is needed |
+| `VeleroBackupValidationFailing` | Backups *rejected before they start* — a different counter, so the rule above cannot see it |
 | `VeleroNoRecentBackup` | Worse — not failing, just not running |
 | `PostgresWALArchivingFailing` | The database serves queries perfectly while archiving nothing |
 | `ArgoCDAppNotSynced` | GitOps stopped converging, so every control in this repo quietly stops being enforced |
+
+**A rejected backup is not a failed backup.** Velero counts a `FailedValidation`
+in `velero_backup_validation_failure_total`, a *different* series from the
+`velero_backup_failure_total` that `VeleroBackupFailing` watches. On 2026-09-18
+the `default` BackupStorageLocation went `Unavailable`, `daily-projects` was
+refused before it started, and nothing alerted: no failure counter moved,
+`VeleroNoRecentBackup` needs 36h, and the only rule firing was
+`VeleroBackupMetricsAbsent` — which this entry tells you to ignore on a young
+cluster. A real outage was camouflaged as the known-benign install-time alert.
+`VeleroBackupValidationFailing` closes that gap at the same 6h cadence as its
+sibling.
 
 **Metric names were cross-checked against the committed dashboards**, not written
 from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, not
