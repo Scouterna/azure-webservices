@@ -459,7 +459,7 @@ not error — it would just get noisy.
 
 A receiver alone would have delivered 155 generic Kubernetes alerts and still
 nothing about this platform's own controls, all of which fail quietly:
-`governance/platform-health.yaml` adds five rules for exactly those.
+`governance/platform-health.yaml` adds six rules for exactly those.
 
 | Alert | The quiet failure it catches |
 |---|---|

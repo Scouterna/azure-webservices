@@ -1234,10 +1234,14 @@ you get a resolved message too, which also confirms the return path).
 
 ### The platform-health rules have targets
 
-Four of the five rules query metrics the committed dashboards already use, so they
-are known-good. `ArgoCDAppNotSynced` is the exception — ArgoCD ships metrics
-Services but no ServiceMonitor, so this install adds one. A rule with no target
-never fires and looks identical to a healthy cluster:
+Four of the six rules query metrics the committed dashboards already use, so they
+are known-good. Two are exceptions, for different reasons. `ArgoCDAppNotSynced` —
+ArgoCD ships metrics Services but no ServiceMonitor, so this install adds one.
+`VeleroBackupValidationFailing` — `velero_backup_validation_failure_total` is on
+no committed dashboard; the Velero board carries only the *restore* equivalent,
+`velero_restore_validation_failed_total`. It was confirmed present in the live
+TSDB for both schedules instead. A rule with no target never fires and looks
+identical to a healthy cluster:
 
 ```bash
 # expect argocd-metrics UP, and a non-empty result for the metric the rule uses
@@ -1253,7 +1257,7 @@ An empty `result` array means the scrape is not working — check the ServiceMon
 selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
 manifest owns and can change on an ArgoCD upgrade.
 
-Two of the seven rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
+Two of the eight rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
 `VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
 a broken scrape reports itself instead of looking like a healthy cluster.
 
