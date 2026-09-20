@@ -48,14 +48,21 @@ spec:
           # The quieter failure: not errors, just nothing running at all.
           # Unscoped, the ad-hoc series (schedule="") is frozen at its creation
           # and trips this 36h later for good — nothing ever re-runs it.
+          # weekly-full needs its own threshold: 36h against a 168h cadence pages
+          # for 5.5 days of every 7. The default arm stays broad so a new schedule
+          # is over-alerted rather than silently unwatched. decisions.md entry 11.
           expr: |
-            time() - velero_backup_last_successful_timestamp{schedule!=""} > 36 * 3600
+            time() - velero_backup_last_successful_timestamp{schedule!="",schedule!="weekly-full"} > 36 * 3600
+            or
+            time() - velero_backup_last_successful_timestamp{schedule="weekly-full"} > 9 * 24 * 3600
           for: 30m
           labels:
             severity: critical
           annotations:
-            summary: "No successful Velero backup for {{ $labels.schedule }} in 36h"
-            description: "The daily schedule has not completed in 36h. Nothing reports this except this alert."
+            summary: "No successful Velero backup for {{ $labels.schedule }}"
+            description: >-
+              The schedule has not completed within its allowance — 36h for a daily
+              schedule, 9 days for weekly-full. Nothing reports this except this alert.
 
         - alert: PostgresWALArchivingFailing
           # WAL archiving is what makes point-in-time recovery possible. A Cluster

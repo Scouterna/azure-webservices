@@ -485,6 +485,22 @@ empty label showed up in the page as `No successful Velero backup for  in 36h`.
 The same series also silences `VeleroBackupMetricsAbsent`, which is supposed to
 report exactly the case where the schedules have stopped emitting.
 
+**`VeleroNoRecentBackup` carries one threshold per cadence, not one for all.** A
+single 36h threshold is right for `daily-projects` and nonsense for
+`weekly-full`, whose cron is `0 3 * * 0`: the series refreshes every 168h, so the
+rule goes true 36h after each Sunday run and stays true until the next one —
+`critical`, for 5.5 days out of every 7. The rule was written that way from the
+start and never fired, because the first `weekly-full` backup on this cluster did
+not exist until 2026-09-20; it would have paged for the first time the following
+afternoon. Found in review of the ad-hoc scoping change, which neither caused it
+nor fixed it.
+
+The default arm stays deliberately broad — `schedule!=""` minus the one
+exception, rather than an allow-list of known schedules. A schedule added later
+inherits the 36h allowance, so if that is wrong for it the rule is *noisy*, which
+gets noticed and corrected. An allow-list would leave it silently unwatched,
+which is the failure this whole rule group exists to prevent.
+
 **A rule goes silent when its exporter does, and that is not obvious.** Every rule
 above needs its series to *exist*: `== 1`, `increase()` and `time() - metric` all
 return nothing when the metric is absent, so the alert cannot fire at the moment the
