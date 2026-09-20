@@ -42,6 +42,24 @@ spec:
             summary: "Velero backup schedule {{ $labels.schedule }} is failing"
             description: "A backup has failed in the last 6h. Restores are the only thing this protects, so it is invisible until one is needed."
 
+        - alert: VeleroBackupValidationFailing
+          # A rejected backup is NOT a failed backup: FailedValidation increments
+          # velero_backup_validation_failure_total, which VeleroBackupFailing does
+          # not watch. Nothing is written and no counter it sees moves, so a dead
+          # BackupStorageLocation is invisible until VeleroNoRecentBackup's 36h.
+          # Cost it 36h on 2026-09-18. decisions.md entry 11.
+          expr: |
+            increase(velero_backup_validation_failure_total{schedule!=""}[6h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Velero backup schedule {{ $labels.schedule }} is being rejected"
+            description: >-
+              The backup was refused before it started — usually the
+              BackupStorageLocation is Unavailable. No data is reaching the
+              store, and no backup-failure counter moves while this is true.
+
         - alert: VeleroNoRecentBackup
           # The quieter failure: not errors, just nothing running at all.
           expr: |
