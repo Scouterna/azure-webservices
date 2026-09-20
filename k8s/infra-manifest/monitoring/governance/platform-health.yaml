@@ -33,8 +33,10 @@ spec:
               key exists in the vault.
 
         - alert: VeleroBackupFailing
+          # schedule!="" on all three Velero rules: an ad-hoc backup is run by a
+          # human watching the result, and its series never updates again.
           expr: |
-            increase(velero_backup_failure_total[6h]) > 0
+            increase(velero_backup_failure_total{schedule!=""}[6h]) > 0
           for: 5m
           labels:
             severity: warning
@@ -44,8 +46,10 @@ spec:
 
         - alert: VeleroNoRecentBackup
           # The quieter failure: not errors, just nothing running at all.
+          # Unscoped, the ad-hoc series (schedule="") is frozen at its creation
+          # and trips this 36h later for good — nothing ever re-runs it.
           expr: |
-            time() - velero_backup_last_successful_timestamp > 36 * 3600
+            time() - velero_backup_last_successful_timestamp{schedule!=""} > 36 * 3600
           for: 30m
           labels:
             severity: critical
@@ -78,8 +82,10 @@ spec:
           # No backup metric at all: Velero is gone, or has never completed one.
           # Fires on a fresh cluster until the first 02:00 run — correct, not a
           # fault. The 48h covers a series that vanished, not one never seen.
+          # Scoped like the rules it backstops: an unscoped ad-hoc series would
+          # hold this silent while both schedules emit nothing.
           expr: |
-            absent_over_time(velero_backup_last_successful_timestamp[48h])
+            absent_over_time(velero_backup_last_successful_timestamp{schedule!=""}[48h])
           for: 1h
           labels:
             severity: critical

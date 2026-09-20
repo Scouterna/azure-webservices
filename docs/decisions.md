@@ -474,6 +474,17 @@ from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, 
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
 
+**Every Velero rule is scoped to `schedule!=""`.** Velero exports its backup
+metrics once per schedule *and* once with an empty `schedule` label, covering
+backups created by hand. That extra series is a trap for `VeleroNoRecentBackup`:
+nothing ever re-runs an ad-hoc backup, so its timestamp freezes the moment it
+completes, crosses 36h a day and a half later, and the alert fires and never
+resolves. It happened on 2026-09-20, and the backup that tripped it was the one
+taken two days earlier to *verify* a repaired `BackupStorageLocation` — the
+empty label showed up in the page as `No successful Velero backup for  in 36h`.
+The same series also silences `VeleroBackupMetricsAbsent`, which is supposed to
+report exactly the case where the schedules have stopped emitting.
+
 **A rule goes silent when its exporter does, and that is not obvious.** Every rule
 above needs its series to *exist*: `== 1`, `increase()` and `time() - metric` all
 return nothing when the metric is absent, so the alert cannot fire at the moment the
