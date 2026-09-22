@@ -525,13 +525,11 @@ more than 10% of a job's targets down, and cannot fire at all if the ServiceMoni
 itself is gone. So the two cases where *absence is itself the failure* get an
 explicit companion:
 
-- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`. It fires on a
-  fresh cluster until the first 02:00 run, which is correct rather than a false
-  positive: no backup has succeeded, so backup alerting really is blind. The
-  window covers a series that existed and vanished; a series that has **never**
-  existed is reported from the first evaluation, so only `for:` delays anything.
-  Sizing `for:` to cover install-to-first-backup would be ~26h, which would also
-  delay a real Velero outage by 26h — not worth it.
+- **`VeleroBackupMetricsAbsent`** — `absent(...)` with `for: 48h`. It fires when
+  no scheduled backup series has existed for 48h: Velero is gone, its scrape is
+  broken, or nothing has succeeded since it started. Until 2026-09-22 it was
+  `absent_over_time(...[48h])` with `for: 1h`, which also fired about an hour into
+  a fresh install; why that changed, and what it cost, is below.
 - **`ArgoCDMetricsAbsent`** — the more useful of the two, because it also catches
   the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
   labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
@@ -562,6 +560,37 @@ resolution was buying nothing. `VeleroBackupFailing` now needs two evaluations t
 fire and so is reported within ~10 minutes rather than ~5; that is acceptable for
 a backup failure and is the only detection delay this adds.
 
+**Superseded 2026-09-22: the range scan is gone.** The 5-minute interval bought
+about 10x, and the TSDB growing back into the 48h window took most of it back.
+`0.0033` was measured the evening of the fix, on series only hours old. Once both
+series filled the window, a scheduled measurement at 04:30Z on 09-22 found
+`VeleroBackupMetricsAbsent` at **8.7s per evaluation, 98.5% of the group**, and the
+group's sustained duty at **0.0293**: 85% of the 0.0346 that caused round three.
+Prometheus was back to reading ~1.5 TB a day, the same volume as the incident,
+though without its 196 MB/s peaks.
+
+The rule is now `absent(m{schedule!=""})` with `for: 48h`. Measured on the live
+TSDB: **10,026 ms and 11,520 samples per evaluation before, 0.10 ms and 2
+samples after.** The 48h is still doing the same job, just in the rule engine's
+pending state instead of in a range selector.
+
+- **A series that vanished is caught just as fast.** The range form fired 48h
+  after the last sample plus `for: 1h`, so about 49h. `absent()` goes true once
+  the series is stale, about 5 minutes after the last sample, then waits
+  `for: 48h`. The earlier objection to a long `for:` was that stacking it *on top
+  of* the range would delay a real outage by another 26h. Replacing the range
+  adds no delay, so that objection does not apply.
+- **A fresh install now waits 48h, not 1h.** A series that has never existed used
+  to be reported from the first evaluation. Now it sits `pending`. This is the one
+  real regression, and it is accepted because an install is attended: someone is
+  there to check the first 02:00 backup by hand, and install.md now tells them
+  to. A month-old outage has nobody watching, and that case is unchanged.
+- **Pending state survives a restart only if the outage is short.** Prometheus
+  writes `for:` progress to `ALERTS_FOR_STATE` and restores it if it was down for
+  less than `rules.alert.for-outage-tolerance`. That flag is **1h** here (verified
+  live), and `for-grace-period` is 10m. A shorter outage, such as a node-image
+  upgrade that drains cleanly, keeps the clock. A longer one restarts the 48h.
+
 **What should have caught it, and still does not.** All three rounds were found by
 an alert firing and being investigated by hand. `platform-controls` reached 27s
 against its own 30s interval — it was nearly missing its schedule, and nothing
@@ -573,11 +602,13 @@ change. When reading that metric, check
 sample reads as a group still running.
 
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
-fires on every fresh install, which is correct — no backup has succeeded, so the
-backup path really is blind — but the `critical` route repeats every hour, so a
-worst-case install-to-first-backup window would have produced around 26 Slack posts
-for an expected condition. That is how a channel gets muted, and a muted channel
-looks exactly like coverage.
+used to fire on every fresh install. That was correct, since no backup had
+succeeded and the backup path really was blind, but the `critical` route repeats
+every hour, so a worst-case install-to-first-backup window produced around 26 Slack
+posts for an expected condition. That is how a channel gets muted, and a muted
+channel looks exactly like coverage. Since 2026-09-22 a healthy install never
+reaches `for: 48h`, so this rule no longer fires there at all. The route stays:
+a genuine absence is still a standing condition.
 
 Downgrading to `warning` was the alternative and was rejected: on a cluster that has
 been up for weeks, a blind backup path is not a warning, and there is no other
