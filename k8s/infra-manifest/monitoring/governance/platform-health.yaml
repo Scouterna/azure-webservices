@@ -12,8 +12,8 @@ metadata:
 spec:
   groups:
     - name: platform-controls
-      # 5m, not the chart's 30s: VeleroBackupMetricsAbsent's 48h window costs
-      # ~0.75s/eval, and no rule here is faster than for: 5m. decisions.md entry 11.
+      # 5m, not the chart's 30s: no rule here is faster than for: 5m, so 30s
+      # bought only cost. decisions.md entry 11.
       interval: 5m
       rules:
         - alert: ExternalSecretNotReady
@@ -33,8 +33,10 @@ spec:
               key exists in the vault.
 
         - alert: VeleroBackupFailing
+          # schedule!="" on all three Velero rules: an ad-hoc backup is run by a
+          # human watching the result, and its series never updates again.
           expr: |
-            increase(velero_backup_failure_total[6h]) > 0
+            increase(velero_backup_failure_total{schedule!=""}[6h]) > 0
           for: 5m
           labels:
             severity: warning
@@ -42,16 +44,43 @@ spec:
             summary: "Velero backup schedule {{ $labels.schedule }} is failing"
             description: "A backup has failed in the last 6h. Restores are the only thing this protects, so it is invisible until one is needed."
 
+        - alert: VeleroBackupValidationFailing
+          # A rejected backup is NOT a failed backup: FailedValidation increments
+          # velero_backup_validation_failure_total, which VeleroBackupFailing does
+          # not watch. Nothing is written and no counter it sees moves, so a dead
+          # BackupStorageLocation is invisible until VeleroNoRecentBackup's 36h.
+          # Cost it 36h on 2026-09-18. decisions.md entry 11.
+          expr: |
+            increase(velero_backup_validation_failure_total{schedule!=""}[6h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Velero backup schedule {{ $labels.schedule }} is being rejected"
+            description: >-
+              The backup was refused before it started — usually the
+              BackupStorageLocation is Unavailable. No data is reaching the
+              store, and no backup-failure counter moves while this is true.
+
         - alert: VeleroNoRecentBackup
           # The quieter failure: not errors, just nothing running at all.
+          # Unscoped, the ad-hoc series (schedule="") is frozen at its creation
+          # and trips this 36h later for good — nothing ever re-runs it.
+          # weekly-full needs its own threshold: 36h against a 168h cadence pages
+          # for 5.5 days of every 7. The default arm stays broad so a new schedule
+          # is over-alerted rather than silently unwatched. decisions.md entry 11.
           expr: |
-            time() - velero_backup_last_successful_timestamp > 36 * 3600
+            time() - velero_backup_last_successful_timestamp{schedule!="",schedule!="weekly-full"} > 36 * 3600
+            or
+            time() - velero_backup_last_successful_timestamp{schedule="weekly-full"} > 9 * 24 * 3600
           for: 30m
           labels:
             severity: critical
           annotations:
-            summary: "No successful Velero backup for {{ $labels.schedule }} in 36h"
-            description: "The daily schedule has not completed in 36h. Nothing reports this except this alert."
+            summary: "No successful Velero backup for {{ $labels.schedule }}"
+            description: >-
+              The schedule has not completed within its allowance — 36h for a daily
+              schedule, 9 days for weekly-full. Nothing reports this except this alert.
 
         - alert: PostgresWALArchivingFailing
           # WAL archiving is what makes point-in-time recovery possible. A Cluster
@@ -75,21 +104,23 @@ spec:
         # when it matters. These two say "the rule above has gone blind".
 
         - alert: VeleroBackupMetricsAbsent
-          # No backup metric at all: Velero is gone, or has never completed one.
-          # Fires on a fresh cluster until the first 02:00 run — correct, not a
-          # fault. The 48h covers a series that vanished, not one never seen.
+          # No backup metric at all: Velero is gone, or nothing has succeeded
+          # since it started. absent() + for: 48h, not absent_over_time([48h]):
+          # same detection time, ~0.1ms instead of ~10s per evaluation. Costs a
+          # 48h wait on a fresh install. Scoped so the ad-hoc series cannot hold
+          # it silent. decisions.md entry 11.
           expr: |
-            absent_over_time(velero_backup_last_successful_timestamp[48h])
-          for: 1h
+            absent(velero_backup_last_successful_timestamp{schedule!=""})
+          for: 48h
           labels:
             severity: critical
           annotations:
             summary: "No Velero backup metrics — backup alerting is blind"
             description: >-
-              Either no backup has ever succeeded, or Velero has stopped reporting.
-              VeleroBackupFailing and VeleroNoRecentBackup both need this series to
-              exist, so neither can fire while this is true. On a cluster installed
-              in the last day this is expected and clears at the first 02:00 run.
+              No scheduled backup has succeeded for 48h since Velero started, or
+              Velero has stopped reporting. VeleroBackupFailing and
+              VeleroNoRecentBackup both need this series to exist, so neither can
+              fire while this is true.
 
         - alert: ArgoCDMetricsAbsent
           # Either ArgoCD stopped reporting, or the ServiceMonitor selector no
@@ -115,25 +146,28 @@ spec:
         - alert: PrometheusRuleGroupExpensive
           # Sustained duty cycle, not peak: a group can dominate the disk for
           # hours while never overrunning its interval, so the chart's
-          # PrometheusMissingRuleEvaluations never fires. 1% clears the busiest
-          # healthy group here by ~14x. decisions.md entry 11.
+          # PrometheusMissingRuleEvaluations never fires. for: 2h because
+          # duration also measures disk contention: a few minutes of heavy
+          # queries inflates every group, but only a truly costly group stays
+          # above 1% for hours. decisions.md entry 11.
           expr: |
             avg_over_time(prometheus_rule_group_last_duration_seconds[1h])
               / prometheus_rule_group_interval_seconds > 0.01
             and
             (time() - prometheus_rule_group_last_evaluation_timestamp_seconds)
               < 2 * prometheus_rule_group_interval_seconds
-          for: 30m
+          for: 2h
           labels:
             severity: warning
           annotations:
             summary: "Rule group {{ $labels.rule_group }} costs {{ $value | humanizePercentage }} of wall-clock to evaluate"
             description: >-
-              One rule group is evaluating continuously enough to saturate the
-              Prometheus disk. Find the rule with /api/v1/rules (evaluationTime
-              per rule), then widen the group's interval or narrow the rule's
-              range selector. The second clause drops groups that stopped being
-              evaluated — a stale sample reads as a group still running.
+              One rule group has spent over 1% of wall-clock evaluating for more
+              than 2h, enough to load the Prometheus disk. If several groups
+              fire together, look for something else holding the disk (a
+              long-range dashboard or query) first. Otherwise find the rule with
+              /api/v1/rules (evaluationTime per rule), then widen the group's
+              interval or narrow the rule's range selector.
 
         - alert: ArgoCDAppNotSynced
           # If ArgoCD stops converging, every control in this repo silently stops

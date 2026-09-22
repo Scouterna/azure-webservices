@@ -1234,10 +1234,14 @@ you get a resolved message too, which also confirms the return path).
 
 ### The platform-health rules have targets
 
-Four of the five rules query metrics the committed dashboards already use, so they
-are known-good. `ArgoCDAppNotSynced` is the exception — ArgoCD ships metrics
-Services but no ServiceMonitor, so this install adds one. A rule with no target
-never fires and looks identical to a healthy cluster:
+Four of the six rules query metrics the committed dashboards already use, so they
+are known-good. Two are exceptions, for different reasons. `ArgoCDAppNotSynced` —
+ArgoCD ships metrics Services but no ServiceMonitor, so this install adds one.
+`VeleroBackupValidationFailing` — `velero_backup_validation_failure_total` is on
+no committed dashboard; the Velero board carries only the *restore* equivalent,
+`velero_restore_validation_failed_total`. It was confirmed present in the live
+TSDB for both schedules instead. A rule with no target never fires and looks
+identical to a healthy cluster:
 
 ```bash
 # expect argocd-metrics UP, and a non-empty result for the metric the rule uses
@@ -1253,19 +1257,29 @@ An empty `result` array means the scrape is not working — check the ServiceMon
 selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
 manifest owns and can change on an ArgoCD upgrade.
 
-Two of the seven rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
+Two of the nine rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
 `VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
 a broken scrape reports itself instead of looking like a healthy cluster.
 
-**Expect `VeleroBackupMetricsAbsent` to fire on a fresh install** — about an hour
-after Prometheus starts (its `for: 1h`), staying firing until the first 02:00 backup
-completes. That is correct, not a fault: no backup has ever succeeded, so backup
-alerting really is blind. It clears itself at the first successful run. Note the
-`[48h]` in the expression gives **no** grace here — `absent_over_time` reports a
-series that has never existed from the first evaluation, so only `for:` delays
-anything. It is routed at a 12h repeat rather than the 1h that `critical`
-normally gets, so expect roughly two messages across that window rather than one an
-hour ([decisions.md](decisions.md) entry 11).
+**`VeleroBackupMetricsAbsent` will not warn you during the install.** It is
+`absent()` with `for: 48h`, so it sits `pending` from the first evaluation and only
+fires if no scheduled backup has succeeded 48 hours later
+([decisions.md](decisions.md) entry 11). On a fresh cluster, nothing alerts you if
+Velero is broken for the first two days. **Check the first 02:00 backup by hand**
+the morning after install:
+
+```bash
+kubectl -n velero get backups.velero.io -l velero.io/schedule-name=daily-projects \
+  -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,ERRORS:.status.errors
+# expect PHASE Completed, ERRORS <none>
+```
+
+The `-o custom-columns` is required. The Backup CRD has no status columns, so a
+plain `get` lists a `FailedValidation` backup exactly like a good one.
+
+`FailedValidation` means the BackupStorageLocation was unavailable when the backup
+ran (`kubectl -n velero get backupstoragelocation default`, as above). No backup at
+all means the Schedule never fired.
 
 ```bash
 kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 &

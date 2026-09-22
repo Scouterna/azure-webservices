@@ -459,20 +459,59 @@ not error — it would just get noisy.
 
 A receiver alone would have delivered 155 generic Kubernetes alerts and still
 nothing about this platform's own controls, all of which fail quietly:
-`governance/platform-health.yaml` adds five rules for exactly those.
+`governance/platform-health.yaml` adds six rules for exactly those.
 
 | Alert | The quiet failure it catches |
 |---|---|
 | `ExternalSecretNotReady` | The Secret keeps serving its last synced value, so the workload runs fine until a rotation or rebuild |
 | `VeleroBackupFailing` | Backups erroring; only matters when a restore is needed |
+| `VeleroBackupValidationFailing` | Backups *rejected before they start* — a different counter, so the rule above cannot see it |
 | `VeleroNoRecentBackup` | Worse — not failing, just not running |
 | `PostgresWALArchivingFailing` | The database serves queries perfectly while archiving nothing |
 | `ArgoCDAppNotSynced` | GitOps stopped converging, so every control in this repo quietly stops being enforced |
+
+**A rejected backup is not a failed backup.** Velero counts a `FailedValidation`
+in `velero_backup_validation_failure_total`, a *different* series from the
+`velero_backup_failure_total` that `VeleroBackupFailing` watches. On 2026-09-18
+the `default` BackupStorageLocation went `Unavailable`, `daily-projects` was
+refused before it started, and nothing alerted: no failure counter moved,
+`VeleroNoRecentBackup` needs 36h, and the only rule firing was
+`VeleroBackupMetricsAbsent` — which this entry tells you to ignore on a young
+cluster. A real outage was camouflaged as the known-benign install-time alert.
+`VeleroBackupValidationFailing` closes that gap at the same 6h cadence as its
+sibling.
 
 **Metric names were cross-checked against the committed dashboards**, not written
 from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, not
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
+
+**Every Velero rule is scoped to `schedule!=""`.** Velero exports its backup
+metrics once per schedule *and* once with an empty `schedule` label, covering
+backups created by hand. That extra series is a trap for `VeleroNoRecentBackup`:
+nothing ever re-runs an ad-hoc backup, so its timestamp freezes the moment it
+completes, crosses 36h a day and a half later, and the alert fires and never
+resolves. It happened on 2026-09-20, and the backup that tripped it was the one
+taken two days earlier to *verify* a repaired `BackupStorageLocation` — the
+empty label showed up in the page as `No successful Velero backup for  in 36h`.
+The same series also silences `VeleroBackupMetricsAbsent`, which is supposed to
+report exactly the case where the schedules have stopped emitting.
+
+**`VeleroNoRecentBackup` carries one threshold per cadence, not one for all.** A
+single 36h threshold is right for `daily-projects` and nonsense for
+`weekly-full`, whose cron is `0 3 * * 0`: the series refreshes every 168h, so the
+rule goes true 36h after each Sunday run and stays true until the next one —
+`critical`, for 5.5 days out of every 7. The rule was written that way from the
+start and never fired, because the first `weekly-full` backup on this cluster did
+not exist until 2026-09-20; it would have paged for the first time the following
+afternoon. Found in review of the ad-hoc scoping change, which neither caused it
+nor fixed it.
+
+The default arm stays deliberately broad — `schedule!=""` minus the one
+exception, rather than an allow-list of known schedules. A schedule added later
+inherits the 36h allowance, so if that is wrong for it the rule is *noisy*, which
+gets noticed and corrected. An allow-list would leave it silently unwatched,
+which is the failure this whole rule group exists to prevent.
 
 **A rule goes silent when its exporter does, and that is not obvious.** Every rule
 above needs its series to *exist*: `== 1`, `increase()` and `time() - metric` all
@@ -486,13 +525,11 @@ more than 10% of a job's targets down, and cannot fire at all if the ServiceMoni
 itself is gone. So the two cases where *absence is itself the failure* get an
 explicit companion:
 
-- **`VeleroBackupMetricsAbsent`** — `absent_over_time(...[48h])`. It fires on a
-  fresh cluster until the first 02:00 run, which is correct rather than a false
-  positive: no backup has succeeded, so backup alerting really is blind. The
-  window covers a series that existed and vanished; a series that has **never**
-  existed is reported from the first evaluation, so only `for:` delays anything.
-  Sizing `for:` to cover install-to-first-backup would be ~26h, which would also
-  delay a real Velero outage by 26h — not worth it.
+- **`VeleroBackupMetricsAbsent`** — `absent(...)` with `for: 48h`. It fires when
+  no scheduled backup series has existed for 48h: Velero is gone, its scrape is
+  broken, or nothing has succeeded since it started. Until 2026-09-22 it was
+  `absent_over_time(...[48h])` with `for: 1h`, which also fired about an hour into
+  a fresh install; why that changed, and what it cost, is below.
 - **`ArgoCDMetricsAbsent`** — the more useful of the two, because it also catches
   the scrape breaking rather than ArgoCD breaking. That ServiceMonitor selects on
   labels the *upstream* ArgoCD manifest owns, which can change on an upgrade.
@@ -523,6 +560,37 @@ resolution was buying nothing. `VeleroBackupFailing` now needs two evaluations t
 fire and so is reported within ~10 minutes rather than ~5; that is acceptable for
 a backup failure and is the only detection delay this adds.
 
+**Superseded 2026-09-22: the range scan is gone.** The 5-minute interval bought
+about 10x, and the TSDB growing back into the 48h window took most of it back.
+`0.0033` was measured the evening of the fix, on series only hours old. Once both
+series filled the window, a scheduled measurement at 04:30Z on 09-22 found
+`VeleroBackupMetricsAbsent` at **8.7s per evaluation, 98.5% of the group**, and the
+group's sustained duty at **0.0293**: 85% of the 0.0346 that caused round three.
+Prometheus was back to reading ~1.5 TB a day, the same volume as the incident,
+though without its 196 MB/s peaks.
+
+The rule is now `absent(m{schedule!=""})` with `for: 48h`. Measured on the live
+TSDB: **10,026 ms and 11,520 samples per evaluation before, 0.10 ms and 2
+samples after.** The 48h is still doing the same job, just in the rule engine's
+pending state instead of in a range selector.
+
+- **A series that vanished is caught just as fast.** The range form fired 48h
+  after the last sample plus `for: 1h`, so about 49h. `absent()` goes true once
+  the series is stale, about 5 minutes after the last sample, then waits
+  `for: 48h`. The earlier objection to a long `for:` was that stacking it *on top
+  of* the range would delay a real outage by another 26h. Replacing the range
+  adds no delay, so that objection does not apply.
+- **A fresh install now waits 48h, not 1h.** A series that has never existed used
+  to be reported from the first evaluation. Now it sits `pending`. This is the one
+  real regression, and it is accepted because an install is attended: someone is
+  there to check the first 02:00 backup by hand, and install.md now tells them
+  to. A month-old outage has nobody watching, and that case is unchanged.
+- **Pending state survives a restart only if the outage is short.** Prometheus
+  writes `for:` progress to `ALERTS_FOR_STATE` and restores it if it was down for
+  less than `rules.alert.for-outage-tolerance`. That flag is **1h** here (verified
+  live), and `for-grace-period` is 10m. A shorter outage, such as a node-image
+  upgrade that drains cleanly, keeps the clock. A longer one restarts the 48h.
+
 **What should have caught it — `PrometheusRuleGroupExpensive`.** All three rounds
 were found by an alert firing and being investigated by hand, so
 `governance/platform-health.yaml` now watches the rule engine's own cost.
@@ -541,14 +609,32 @@ group spends evaluating, which is what actually drives disk reads:
 
 | | sustained duty cycle |
 |---|---|
-| `platform-controls`, before the fix | **0.0346** |
-| `platform-controls`, after | 0.0033 |
-| busiest other group on this cluster | 0.0007 |
+| `platform-controls`, round three (30s interval) | **0.0346** |
+| `platform-controls`, 5m interval, 48h window full (2026-09-22 04:30Z) | **0.0293** |
+| `platform-controls`, range scan removed (2026-09-22 07:45Z) | 0.00025 |
+| other groups, uncontended median, 4 days | 0.0002–0.002 |
 
-So the threshold is **0.01**: 3.5x under the broken state, 3x over the fixed one,
-14x over the noisiest healthy group. Rounds one and two clear it by 80-190x.
-Verified by evaluating the expression at a timestamp before the fix, where it
-returns exactly one series and names the right group.
+So the threshold is **0.01**: about 3x under both measured broken states, and at
+least 5x over the busiest healthy group's uncontended median. Rounds one and two
+clear it by 80-190x. Verified by evaluating the expression at a timestamp before
+the interval fix, where it returns exactly one series and names the right group.
+(The `0.0033` this entry once gave for "after the fix" was measured on series
+only hours old; see the superseded note above.)
+
+**`for: 2h`, because duration measures the disk as much as the group.** On
+2026-09-22 between 06:33 and 06:41Z, the ad-hoc range queries run to calibrate
+this rule saturated the Prometheus disk. Every group slowed 100-2000x:
+`node-exporter` went from 0.01s to **20.8s** per evaluation, and even
+`platform-controls`, by then at 0.01s, reached 1.9s. Eight minutes pushed
+`node-exporter`'s 1h average to about **0.027**. It stays above 0.01 for most of
+the next hour, so with the original `for: 30m` this rule would have fired a
+warning naming an innocent group, for a problem caused by someone looking at
+Prometheus. The history shows the same pattern on 09-20 at 06:41–07:41Z and
+20:41Z. A contention episode lasts minutes, and the 1h average can only stay
+raised for about an hour after it ends, so it cannot satisfy `for: 2h`. A group
+that is really expensive stays expensive: `platform-controls` sat above 0.01 for
+more than two days, and each incident round lasted hours. If several groups do
+fire together, look for what is holding the disk before blaming the highest.
 
 It is deliberately **not** a peak alert. The chart's
 `PrometheusMissingRuleEvaluations` already covers a group overrunning far enough
@@ -564,14 +650,17 @@ keeps its last duration sample, and
 distinguishes that from a group still running. Reading the duration without it
 once turned a stale 89s sample into a false conclusion.
 
-The rule costs ~0.001s per evaluation against the 0.754s it exists to find.
+The rule costs about 0.9 ms (3,813 samples) per evaluation, against the 8.7s per evaluation it
+would have found at the 2026-09-22 plateau.
 
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
-fires on every fresh install, which is correct — no backup has succeeded, so the
-backup path really is blind — but the `critical` route repeats every hour, so a
-worst-case install-to-first-backup window would have produced around 26 Slack posts
-for an expected condition. That is how a channel gets muted, and a muted channel
-looks exactly like coverage.
+used to fire on every fresh install. That was correct, since no backup had
+succeeded and the backup path really was blind, but the `critical` route repeats
+every hour, so a worst-case install-to-first-backup window produced around 26 Slack
+posts for an expected condition. That is how a channel gets muted, and a muted
+channel looks exactly like coverage. Since 2026-09-22 a healthy install never
+reaches `for: 48h`, so this rule no longer fires there at all. The route stays:
+a genuine absence is still a standing condition.
 
 Downgrading to `warning` was the alternative and was rejected: on a cluster that has
 been up for weeks, a blind backup path is not a warning, and there is no other
