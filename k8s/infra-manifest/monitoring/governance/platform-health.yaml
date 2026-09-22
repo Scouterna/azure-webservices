@@ -12,8 +12,8 @@ metadata:
 spec:
   groups:
     - name: platform-controls
-      # 5m, not the chart's 30s: VeleroBackupMetricsAbsent's 48h window costs
-      # ~0.75s/eval, and no rule here is faster than for: 5m. decisions.md entry 11.
+      # 5m, not the chart's 30s: no rule here is faster than for: 5m, so 30s
+      # bought only cost. decisions.md entry 11.
       interval: 5m
       rules:
         - alert: ExternalSecretNotReady
@@ -104,23 +104,23 @@ spec:
         # when it matters. These two say "the rule above has gone blind".
 
         - alert: VeleroBackupMetricsAbsent
-          # No backup metric at all: Velero is gone, or has never completed one.
-          # Fires on a fresh cluster until the first 02:00 run — correct, not a
-          # fault. The 48h covers a series that vanished, not one never seen.
-          # Scoped like the rules it backstops: an unscoped ad-hoc series would
-          # hold this silent while both schedules emit nothing.
+          # No backup metric at all: Velero is gone, or nothing has succeeded
+          # since it started. absent() + for: 48h, not absent_over_time([48h]):
+          # same detection time, ~0.1ms instead of ~10s per evaluation. Costs a
+          # 48h wait on a fresh install. Scoped so the ad-hoc series cannot hold
+          # it silent. decisions.md entry 11.
           expr: |
-            absent_over_time(velero_backup_last_successful_timestamp{schedule!=""}[48h])
-          for: 1h
+            absent(velero_backup_last_successful_timestamp{schedule!=""})
+          for: 48h
           labels:
             severity: critical
           annotations:
             summary: "No Velero backup metrics — backup alerting is blind"
             description: >-
-              Either no backup has ever succeeded, or Velero has stopped reporting.
-              VeleroBackupFailing and VeleroNoRecentBackup both need this series to
-              exist, so neither can fire while this is true. On a cluster installed
-              in the last day this is expected and clears at the first 02:00 run.
+              No scheduled backup has succeeded for 48h since Velero started, or
+              Velero has stopped reporting. VeleroBackupFailing and
+              VeleroNoRecentBackup both need this series to exist, so neither can
+              fire while this is true.
 
         - alert: ArgoCDMetricsAbsent
           # Either ArgoCD stopped reporting, or the ServiceMonitor selector no

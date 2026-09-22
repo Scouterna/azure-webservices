@@ -1261,15 +1261,25 @@ Two of the eight rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
 `VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
 a broken scrape reports itself instead of looking like a healthy cluster.
 
-**Expect `VeleroBackupMetricsAbsent` to fire on a fresh install** — about an hour
-after Prometheus starts (its `for: 1h`), staying firing until the first 02:00 backup
-completes. That is correct, not a fault: no backup has ever succeeded, so backup
-alerting really is blind. It clears itself at the first successful run. Note the
-`[48h]` in the expression gives **no** grace here — `absent_over_time` reports a
-series that has never existed from the first evaluation, so only `for:` delays
-anything. It is routed at a 12h repeat rather than the 1h that `critical`
-normally gets, so expect roughly two messages across that window rather than one an
-hour ([decisions.md](decisions.md) entry 11).
+**`VeleroBackupMetricsAbsent` will not warn you during the install.** It is
+`absent()` with `for: 48h`, so it sits `pending` from the first evaluation and only
+fires if no scheduled backup has succeeded 48 hours later
+([decisions.md](decisions.md) entry 11). On a fresh cluster, nothing alerts you if
+Velero is broken for the first two days. **Check the first 02:00 backup by hand**
+the morning after install:
+
+```bash
+kubectl -n velero get backups.velero.io -l velero.io/schedule-name=daily-projects \
+  -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,ERRORS:.status.errors
+# expect PHASE Completed, ERRORS <none>
+```
+
+The `-o custom-columns` is required. The Backup CRD has no status columns, so a
+plain `get` lists a `FailedValidation` backup exactly like a good one.
+
+`FailedValidation` means the BackupStorageLocation was unavailable when the backup
+ran (`kubectl -n velero get backupstoragelocation default`, as above). No backup at
+all means the Schedule never fired.
 
 ```bash
 kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 &
