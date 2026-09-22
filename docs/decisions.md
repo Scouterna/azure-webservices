@@ -591,15 +591,67 @@ pending state instead of in a range selector.
   live), and `for-grace-period` is 10m. A shorter outage, such as a node-image
   upgrade that drains cleanly, keeps the clock. A longer one restarts the 48h.
 
-**What should have caught it, and still does not.** All three rounds were found by
-an alert firing and being investigated by hand. `platform-controls` reached 27s
-against its own 30s interval — it was nearly missing its schedule, and nothing
-watches for that. `prometheus_rule_group_last_duration_seconds` against
-`prometheus_rule_group_interval_seconds` would have caught all three early, and
-this file is the obvious place for it. Left open rather than added in the same
-change. When reading that metric, check
-`time() - prometheus_rule_group_last_evaluation_timestamp_seconds` first: a stale
-sample reads as a group still running.
+**What should have caught it — `PrometheusRuleGroupExpensive`.** All three rounds
+were found by an alert firing and being investigated by hand, so
+`governance/platform-health.yaml` now watches the rule engine's own cost.
+
+**The obvious form of that rule does not work, and this entry said otherwise
+until it was measured.** Comparing duration to interval and alerting near 1.0
+catches rounds one and two (ratios 1.9 and 0.83) and **misses round three
+entirely**: over the 14h before the fix, `platform-controls` had a median ratio
+of **0.024** and never once exceeded **0.35**. A threshold at 0.5 would have sat
+silent through the whole incident. The peak of 27s was a symptom of the saturated
+disk, not the signal — by then the alert had already fired.
+
+What separates the states is the **sustained** duty cycle, `avg_over_time` of the
+duration over an hour divided by the interval — the fraction of wall-clock the
+group spends evaluating, which is what actually drives disk reads:
+
+| | sustained duty cycle |
+|---|---|
+| `platform-controls`, round three (30s interval) | **0.0346** |
+| `platform-controls`, 5m interval, 48h window full (2026-09-22 04:30Z) | **0.0293** |
+| `platform-controls`, range scan removed (2026-09-22 07:45Z) | 0.00025 |
+| other groups, uncontended median, 4 days | 0.0002–0.002 |
+
+So the threshold is **0.01**: about 3x under both measured broken states, and at
+least 5x over the busiest healthy group's uncontended median. Rounds one and two
+clear it by 80-190x. Verified by evaluating the expression at a timestamp before
+the interval fix, where it returns exactly one series and names the right group.
+(The `0.0033` this entry once gave for "after the fix" was measured on series
+only hours old; see the superseded note above.)
+
+**`for: 2h`, because duration measures the disk as much as the group.** On
+2026-09-22 between 06:33 and 06:41Z, the ad-hoc range queries run to calibrate
+this rule saturated the Prometheus disk. Every group slowed 100-2000x:
+`node-exporter` went from 0.01s to **20.8s** per evaluation, and even
+`platform-controls`, by then at 0.01s, reached 1.9s. Eight minutes pushed
+`node-exporter`'s 1h average to about **0.027**. It stays above 0.01 for most of
+the next hour, so with the original `for: 30m` this rule would have fired a
+warning naming an innocent group, for a problem caused by someone looking at
+Prometheus. The history shows the same pattern on 09-20 at 06:41–07:41Z and
+20:41Z. A contention episode lasts minutes, and the 1h average can only stay
+raised for about an hour after it ends, so it cannot satisfy `for: 2h`. A group
+that is really expensive stays expensive: `platform-controls` sat above 0.01 for
+more than two days, and each incident round lasted hours. If several groups do
+fire together, look for what is holding the disk before blaming the highest.
+
+It is deliberately **not** a peak alert. The chart's
+`PrometheusMissingRuleEvaluations` already covers a group overrunning far enough
+to skip an iteration, and `PrometheusRuleFailures` covers one timing out — the
+acute cases. Neither fired during round three: iterations missed and evaluation
+failures were both **zero** for the whole incident, because a group can dominate
+the disk for hours without ever missing its schedule. That gap is the whole
+reason this rule exists.
+
+The second clause is a staleness guard: a group that stopped being evaluated
+keeps its last duration sample, and
+`time() - prometheus_rule_group_last_evaluation_timestamp_seconds` is what
+distinguishes that from a group still running. Reading the duration without it
+once turned a stale 89s sample into a false conclusion.
+
+The rule costs about 0.9 ms (3,813 samples) per evaluation, against the 8.7s per evaluation it
+would have found at the 2026-09-22 plateau.
 
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
 used to fire on every fresh install. That was correct, since no backup had

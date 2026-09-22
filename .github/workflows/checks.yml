@@ -283,3 +283,70 @@ jobs:
               sys.exit(1)
           PY
 
+
+  rule-counts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The docs count the platform-health rules in prose. Adding a rule left
+      # them stale three times (#41, #42, #39) with nothing to notice.
+      - name: prose rule counts match platform-health.yaml
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          WORDS = {w: n for n, w in enumerate(
+              "zero one two three four five six seven eight nine ten eleven "
+              "twelve thirteen fourteen fifteen".split())}
+          RULES = pathlib.Path(
+              'k8s/infra-manifest/monitoring/governance/platform-health.yaml').read_text()
+          DEC = pathlib.Path('docs/decisions.md').read_text()
+          INST = pathlib.Path('docs/install.md').read_text()
+          bad = []
+
+          alerts = re.findall(r'^\s*- alert:\s*(\S+)', RULES, re.M)
+          absent = [a for a in alerts if a.endswith('Absent')]
+
+          # The quiet-failure table in entry 11: first table after its heading.
+          sec = DEC.split('## What the rules actually watch', 1)
+          if len(sec) != 2:
+              sys.exit("decisions.md: heading 'What the rules actually watch' not found")
+          table, started = [], False
+          for line in sec[1].splitlines():
+              if line.startswith('|'):
+                  started = True
+                  m = re.match(r'\| `(\w+)` \|', line)
+                  if m:
+                      table.append(m.group(1))
+              elif started:
+                  break
+          for name in table:
+              if name not in alerts:
+                  bad.append(f"decisions.md table lists `{name}`, which is not an alert "
+                             f"in platform-health.yaml")
+
+          def claim(text, fname, pattern, *expected):
+              # A reworded sentence must fail, not silently stop being checked.
+              found = re.findall(pattern, text)
+              if len(found) != 1:
+                  bad.append(f"{fname}: expected exactly one match for /{pattern}/, "
+                             f"found {len(found)} -- update this check if you reworded it")
+                  return
+              words = found[0] if isinstance(found[0], tuple) else (found[0],)
+              for word, (want, what) in zip(words, expected):
+                  got = WORDS.get(word.lower())
+                  if got != want:
+                      bad.append(f"{fname}: says '{word}' {what}, but there are {want}")
+
+          claim(DEC, 'decisions.md', r'adds (\w+) rules for exactly those',
+                (len(table), 'quiet-failure rules'))
+          claim(INST, 'install.md', r'\w+ of the (\w+) rules query metrics',
+                (len(table), 'quiet-failure rules'))
+          claim(INST, 'install.md', r'(\w+) of the (\w+) rules exist to catch',
+                (len(absent), '*Absent rules'), (len(alerts), 'rules in total'))
+
+          print(f"{len(alerts)} rules, {len(absent)} *Absent, {len(table)} in the table")
+          if bad:
+              print('\n'.join(bad), file=sys.stderr)
+              sys.exit(1)
+          PY

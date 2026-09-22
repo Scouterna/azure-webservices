@@ -139,6 +139,36 @@ spec:
               ArgoCD's Service labels (install.md §11) before assuming ArgoCD itself
               is down.
 
+        # --- The monitoring stack's own cost --------------------------
+        # Three NodeDiskIOSaturation rounds were all caused by one rule group
+        # out-reading the Prometheus disk, and all three were found by hand.
+
+        - alert: PrometheusRuleGroupExpensive
+          # Sustained duty cycle, not peak: a group can dominate the disk for
+          # hours while never overrunning its interval, so the chart's
+          # PrometheusMissingRuleEvaluations never fires. for: 2h because
+          # duration also measures disk contention: a few minutes of heavy
+          # queries inflates every group, but only a truly costly group stays
+          # above 1% for hours. decisions.md entry 11.
+          expr: |
+            avg_over_time(prometheus_rule_group_last_duration_seconds[1h])
+              / prometheus_rule_group_interval_seconds > 0.01
+            and
+            (time() - prometheus_rule_group_last_evaluation_timestamp_seconds)
+              < 2 * prometheus_rule_group_interval_seconds
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Rule group {{ $labels.rule_group }} costs {{ $value | humanizePercentage }} of wall-clock to evaluate"
+            description: >-
+              One rule group has spent over 1% of wall-clock evaluating for more
+              than 2h, enough to load the Prometheus disk. If several groups
+              fire together, look for something else holding the disk (a
+              long-range dashboard or query) first. Otherwise find the rule with
+              /api/v1/rules (evaluationTime per rule), then widen the group's
+              interval or narrow the rule's range selector.
+
         - alert: ArgoCDAppNotSynced
           # If ArgoCD stops converging, every control in this repo silently stops
           # being enforced — including the ones that self-heal drift.
