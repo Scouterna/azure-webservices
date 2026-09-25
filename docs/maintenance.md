@@ -73,7 +73,7 @@ Not all bumps are equal. These carry a real risk of breaking changes:
 - **Telemetry store** — runs **PGSTY Silo**, a community fork of MinIO, on the
   min.io `minio` chart. MinIO Inc. ended community distribution in 2025 and has
   since deleted `quay.io/minio/*`; the chart's default image stopped pulling,
-  which broke the store on 2026-09-25 (see
+  which broke the store on 2026-09-24 (see
   [Upstream withdrawal](#upstream-withdrawal)). The image is overridden in
   `k8s/infra-manifest/telemetry-store/values.yaml` and reused by the bucket Job,
   so **bumping `targetRevision` does not change the image** — bump the digest
@@ -155,7 +155,7 @@ check, not a setting:
 - **Every pinned image can still be pulled.** A replacement node starts with
   an empty image cache, so each weekly upgrade re-pulls every image. An image
   deleted upstream keeps running from cache until then, and then fails with
-  `ImagePullBackOff`. That is what happened on 2026-09-25: the three settings
+  `ImagePullBackOff`. That is what happened on 2026-09-24: the three settings
   above all held, but the telemetry store could not pull
   `quay.io/minio/minio`, and Loki and Thanos went down with it. See
   [Upstream withdrawal](#upstream-withdrawal).
@@ -286,7 +286,7 @@ Pinning protects against an upstream *change*. It does nothing about an
 upstream *deletion*, and the cluster cannot tell the two apart until it next
 pulls.
 
-**What happened, 2026-09-25.** The weekly node-image upgrade replaced the node
+**What happened, 2026-09-24.** The weekly node-image upgrade replaced the node
 at ~23:29 UTC. The new node could not pull
 `quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z`: MinIO Inc. had deleted
 its public images (`401` from quay, "object not found" on Docker Hub). The

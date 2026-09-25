@@ -5,7 +5,7 @@
 # A running pod proves nothing: the node may be serving the image from its
 # cache. Every node-image upgrade replaces the node and re-pulls everything, so
 # an image deleted upstream breaks on the next weekly upgrade, not when it is
-# deleted. On 2026-09-25 that took out the telemetry store, Loki and Thanos:
+# deleted. On 2026-09-24 that took out the telemetry store, Loki and Thanos:
 # MinIO Inc. had removed quay.io/minio/*.
 #
 # Asks each registry for the manifest anonymously, as a node does. Only reads.
