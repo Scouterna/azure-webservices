@@ -1,7 +1,8 @@
 # Namespace isolation
 
-Why the cluster stops a project namespace from reaching the node and the shared
-Key Vault, and what the three controls that do it deliberately do *not* cover.
+Why the cluster stops a project namespace from reaching the node, the shared
+Key Vault and the telemetry store, and what the four controls that do it
+deliberately do *not* cover.
 
 ## The problem these controls address
 
