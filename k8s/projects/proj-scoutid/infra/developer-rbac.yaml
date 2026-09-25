@@ -44,6 +44,24 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: scoutid-team-admin
+  namespace: proj-scoutid-staging
+subjects:
+  - kind: Group
+    name: "aks:jwt:Scouterna:ScoutID"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin                      # or `view` — prod is a fair place to use view
+  apiGroup: rbac.authorization.k8s.io
+---
+# Same team, prod namespace. A RoleBinding is namespaced and does NOT cross
+# namespaces, so each one needs its own. The name may repeat — RoleBinding names
+# only have to be unique within a namespace.
+# (Single-namespace project? Delete this block and use proj-scoutid in the one above.)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: scoutid-team-admin
   namespace: proj-scoutid-prod
 subjects:
   - kind: Group
