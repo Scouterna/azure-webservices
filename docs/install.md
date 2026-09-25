@@ -1122,6 +1122,30 @@ If an `ExternalSecret` starts failing only *after* this policy applies, it was
 silently falling back to the node identity through IMDS — fix the federated
 credential (§8), don't widen the policy.
 
+### Telemetry store is closed
+
+Same trap as the IMDS policy: `telemetry-store` reports Synced whether or not
+Cilium enforces `telemetry-store-ingress`. Probe from both sides:
+
+```bash
+# From a project namespace: must exit 28 (timeout)
+kubectl run store-probe --rm -it --restart=Never -n <project-ns> \
+  --image=curlimages/curl:latest -- \
+  curl -sS -m 5 -o /dev/null -w '%{http_code}\n' \
+  http://telemetry-store.telemetry-store.svc.cluster.local:9000/minio/health/live
+
+# From monitoring: must print 200
+kubectl run store-probe --rm -it --restart=Never -n monitoring \
+  --image=curlimages/curl:latest -- \
+  curl -sS -m 5 -o /dev/null -w '%{http_code}\n' \
+  http://telemetry-store.telemetry-store.svc.cluster.local:9000/minio/health/live
+```
+
+A `200` from the project namespace means the policy is not enforced. A timeout
+from `monitoring` means it is too tight, and Loki and Thanos are about to fail
+([security.md](security.md) §4). Any other failure means the probe never ran —
+in a `restricted` namespace, Pod Security rejects the curl pod; use a `baseline` one.
+
 ### Audit logs are actually arriving
 
 The diagnostic setting existing is not the same as events landing — a wrong

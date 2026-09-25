@@ -1,0 +1,29 @@
+# Only `monitoring` (Loki, Thanos, Prometheus scrape) and this namespace (the
+# bucket Job) may reach the store, on the S3 port only. It holds every
+# namespace's logs, so a project pod must not reach it. docs/security.md §4.
+# The console port (9001) has no rule, so nothing reaches it.
+# Verify enforcement, not sync: install.md §11 ("Telemetry store is closed").
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: telemetry-store-ingress
+  namespace: telemetry-store
+spec:
+  podSelector:
+    matchLabels:
+      # The chart hardcodes app=minio regardless of fullnameOverride.
+      app: minio
+      release: telemetry-store
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # kubernetes.io/metadata.name is set by the API server; a project
+        # cannot put it on its own namespace.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 9000

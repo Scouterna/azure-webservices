@@ -28,12 +28,13 @@ spec:
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
       ref: values
-    # ServiceMonitor as a plain manifest — see values.yaml for why not the chart's.
+    # Plain manifests: the ServiceMonitor (see values.yaml for why not the
+    # chart's) and the NetworkPolicy. A file not named here is silently ignored.
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
       path: k8s/infra-manifest/telemetry-store
       directory:
-        include: 'servicemonitor.yaml'
+        include: '{servicemonitor.yaml,networkpolicy.yaml}'
   syncPolicy:
     automated:
       prune: true
