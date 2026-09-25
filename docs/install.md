@@ -1146,6 +1146,40 @@ from `monitoring` means it is too tight, and Loki and Thanos are about to fail
 ([security.md](security.md) §4). Any other failure means the probe never ran —
 in a `restricted` namespace, Pod Security rejects the curl pod; use a `baseline` one.
 
+### Monitoring is closed
+
+The `governance` app reports Synced whether or not the policies in
+`networkpolicy-ingress.yaml` are enforced, and two of the three allowed paths
+fail silently. Check all of them:
+
+```bash
+# 1. From a project namespace, every monitoring API must time out (exit 28)
+kubectl run mon-probe --restart=Never -n <project-ns> --image=curlimages/curl:latest \
+  --command -- sh -c 'for u in http://loki.monitoring:3100/ready \
+    http://kps-kube-prometheus-stack-prometheus.monitoring:9090/-/ready \
+    http://kps-kube-prometheus-stack-alertmanager.monitoring:9093/-/ready; do
+    curl -sS -m 5 -o /dev/null "$u"; echo "$u exit=$?"; done'
+kubectl -n <project-ns> wait --for=jsonpath='{.status.phase}'=Succeeded pod/mon-probe --timeout=60s
+kubectl -n <project-ns> logs mon-probe; kubectl -n <project-ns> delete pod mon-probe
+
+# 2. Grafana through Traefik: must print 200
+curl -s -o /dev/null -w '%{http_code}\n' https://grafana.$HOST/api/health
+
+# 3. The admission webhook is reachable: an invalid rule must be REJECTED, fast.
+#    Accepted after ~10s means the webhook was blocked and silently skipped.
+cat <<'EOF' | kubectl apply --dry-run=server -f -
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata: {name: webhook-probe, namespace: monitoring}
+spec: {groups: [{name: probe, rules: [{alert: Probe, expr: "not promql("}]}]}
+EOF
+```
+
+The HTTP-01 solver path cannot be probed until a renewal: check `grafana-tls`
+is still `Ready` after its next renewal (`kubectl -n monitoring get certificate`),
+or prove it early with a `letsencrypt-staging` Certificate for the same host
+([security.md](security.md) §5).
+
 ### Audit logs are actually arriving
 
 The diagnostic setting existing is not the same as events landing — a wrong
