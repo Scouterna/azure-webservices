@@ -17,12 +17,15 @@ kind: Job
 metadata:
   name: telemetry-store-create-buckets
   namespace: telemetry-store
+  annotations:
+    # A Job's template is immutable. Replace=true alone is `kubectl replace`,
+    # which the API server rejects; with Force=true ArgoCD deletes and recreates.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 spec:
   # ArgoCD manages this as a normal resource (not a hook). The completed Job is
   # left in place — ArgoCD reads Job "Complete" as Healthy and stays Synced, no
-  # churn. On a rebuild it's a fresh cluster; if the spec ever changes, the app's
-  # Replace=true recreates the (immutable) Job. The mc commands are idempotent
-  # (`mb --ignore-existing`), so a re-run is always safe.
+  # churn. A spec change recreates it (annotation above), so it re-runs; the mc
+  # commands are idempotent (`mb --ignore-existing`), so that is always safe.
   backoffLimit: 10
   template:
     metadata:
