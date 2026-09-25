@@ -14,7 +14,8 @@ to all of it.
 
 Three paths led out of a namespace: two to the node (§1, §2, which close each
 other's gap and neither of which is sufficient alone), and one straight to the
-vault (§3) that neither of the first two touches.
+vault (§3) that neither of the first two touches. A fourth control (§4) closes
+one shared service that holds every namespace's data.
 
 ## 1. Egress to IMDS is denied
 
@@ -163,6 +164,33 @@ that a store named `azure-kv` exists at all (every `ExternalSecret` here
 references it *by name*, so a rename breaks all of them), that it has
 `conditions`, that those conditions carry a selector matching the label, and that
 every namespace consuming it is permitted by one clause or the other.
+
+## 4. The telemetry store accepts only `monitoring`
+
+`k8s/infra-manifest/telemetry-store/networkpolicy.yaml`
+
+The telemetry store holds Loki's chunks and Thanos's blocks — logs and metrics
+from **every** namespace. With no policy, any pod in the cluster could reach its
+S3 port, so the only thing between a project and every other project's logs was
+the store's credentials.
+
+**The policy.** Ingress to the store pod on `9000` from `monitoring` (Loki,
+Thanos, the Prometheus scrape) and from `telemetry-store` itself (the bucket
+Job). Nothing else, and nothing at all on the console port `9001`.
+
+**Why the namespace, not the pods.** Four workloads in `monitoring` talk to the
+store (`loki`, `thanos-store-gateway`, `thanos-compact`, and Prometheus's Thanos
+sidecar), and their labels are the charts' to change. Projects cannot create
+pods in `monitoring`, so the namespace is the boundary that matters, and it
+fails closed: a missing client breaks Loki loudly rather than admitting a
+stranger quietly. The selector uses `kubernetes.io/metadata.name`, which the API
+server sets and a project cannot put on its own namespace.
+
+**The store pod has no probes**, so the policy cannot break kubelet health
+checks — worth re-checking if a chart upgrade adds them.
+
+**Verifying.** Synced does not mean enforced: [install.md](install.md) §11
+("Telemetry store is closed").
 
 ## Known limits
 
