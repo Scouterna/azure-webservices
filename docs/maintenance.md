@@ -14,7 +14,9 @@ this document is how we keep them current without surprises.
   sake — upgrade the fast-movers often, the stable ones rarely.
 - **Test before prod.** When there is a dev/test cluster, upgrade there first.
   The whole platform can be rebuilt from Git (see [`docs/install.md`](install.md)), so a bad
-  upgrade is recoverable.
+  upgrade is recoverable — **as long as every pinned chart and image still exists
+  upstream.** Git holds the references, not the artifacts; see
+  [Upstream withdrawal](#upstream-withdrawal).
 
 ## Cadence by component
 
@@ -23,7 +25,8 @@ Based on each project's real release velocity and blast radius:
 | Cadence | Components | Notes |
 |---|---|---|
 | **Quarterly** (fast-movers) | kube-prometheus-stack, Traefik, ArgoCD, Grafana/Loki/Alloy | Release often; chart-major bumps can change values. Review changelogs. |
-| **Semi-annual** (stable) | cert-manager, MinIO, CloudNativePG, Thanos, Headlamp, External Secrets, Gateway API CRDs | Slower cadence, fewer breaking changes. Bump the Gateway API CRDs in step with Traefik (see below). |
+| **Semi-annual** (stable) | cert-manager, telemetry store, CloudNativePG, Thanos, Headlamp, External Secrets, Gateway API CRDs | Slower cadence, fewer breaking changes. Bump the Gateway API CRDs in step with Traefik (see below). The telemetry store's image is pinned in its values file, not by `targetRevision` (see below). |
+| **Semi-annual** (upstream health) | every image the cluster runs | `scripts/check-images-pullable.sh` — see [Upstream withdrawal](#upstream-withdrawal). A pin that no longer exists upstream breaks on the next node upgrade. |
 | **Quarterly** (audit health) | the audit log pipeline | Confirm rows are still arriving and the daily cap has not been hit — `install.md` §11. The Azure alerts catch both faster, but this is the check that does not depend on them. |
 | **AKS Kubernetes** | the cluster | Patch upgrades are automatic (`autoUpgradeProfile: patch` in the Bicep). **Minor** upgrades (1.36→1.37) are manual, ~3×/year following the K8s release train — do them before the running minor goes out of AKS support. |
 
@@ -67,8 +70,20 @@ Not all bumps are equal. These carry a real risk of breaking changes:
   file really carries release images, are in the README beside it. The file also
   contains the `ObjectStore` CRD, so a bump can change the schema that
   `k8s/infra-manifest/postgres/cluster.yaml` depends on.
+- **Telemetry store** — runs **PGSTY Silo**, a community fork of MinIO, on the
+  min.io `minio` chart. MinIO Inc. ended community distribution in 2025 and has
+  since deleted `quay.io/minio/*`; the chart's default image stopped pulling,
+  which broke the store on 2026-09-24 (see
+  [Upstream withdrawal](#upstream-withdrawal)). The image is overridden in
+  `k8s/infra-manifest/telemetry-store/values.yaml` and reused by the bucket Job,
+  so **bumping `targetRevision` does not change the image** — bump the digest
+  pin in both files. Silo keeps MinIO's data format, `MINIO_*` variables and
+  metrics paths, and maps the chart's `minio` command to `silo`; before a bump,
+  check its compatibility notes. Data written by MinIO `2024-12-18` was verified
+  to read back byte-identical under Silo `2026-09-16`. The min.io chart itself
+  is unmaintained (`5.4.0` is its last release) and could disappear the same way.
 
-Slow/low-risk: MinIO, CloudNativePG (operator; watch the PG major it manages),
+Slow/low-risk: CloudNativePG (operator; watch the PG major it manages),
 Thanos, Headlamp.
 
 ## How to upgrade a common service
@@ -119,7 +134,8 @@ a manual step that gets forgotten is worse than an automatic one that
 occasionally disrupts. The fix is to make the disruption survivable, not to move
 it into a runbook nobody runs.
 
-Three things make it survivable, all now in place:
+Four things make it survivable. The first three are in place; the fourth is a
+check, not a setting:
 
 - **One availability zone** ([decisions.md](decisions.md) entry 15) — so a
   replacement node can always reattach the cluster's disks. Without it the
@@ -135,6 +151,14 @@ Three things make it survivable, all now in place:
   Previously an upgrade restarted Dex, rotated its key and logged **everyone**
   out; the resulting `401` looked exactly like a broken authenticator and caused
   two wrong diagnoses. Keys now persist as custom resources in etcd — no PVC.
+
+- **Every pinned image can still be pulled.** A replacement node starts with
+  an empty image cache, so each weekly upgrade re-pulls every image. An image
+  deleted upstream keeps running from cache until then, and then fails with
+  `ImagePullBackOff`. That is what happened on 2026-09-24: the three settings
+  above all held, but the telemetry store could not pull
+  `quay.io/minio/minio`, and Loki and Thanos went down with it. See
+  [Upstream withdrawal](#upstream-withdrawal).
 
 **If SSO fails, check the token's key id first.** It takes seconds and rules out
 the most common cause:
@@ -256,12 +280,57 @@ resources are expected there. On `daily-projects` it is not; investigate.
 > far captured object state only. A green `Completed` on a nightly is not
 > evidence that volume backup works — that only starts once a project has a PVC.
 
+## Upstream withdrawal
+
+Pinning protects against an upstream *change*. It does nothing about an
+upstream *deletion*, and the cluster cannot tell the two apart until it next
+pulls.
+
+**What happened, 2026-09-24.** The weekly node-image upgrade replaced the node
+at ~23:29 UTC. The new node could not pull
+`quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z`: MinIO Inc. had deleted
+its public images (`401` from quay, "object not found" on Docker Hub). The
+image had run for a week only because the old node had cached it. The telemetry
+store stayed in `ImagePullBackOff`; Loki and Thanos store-gateway crash-looped
+on `connection refused`; ~10 warnings paged overnight. No data was lost: the
+store's PVC was intact, and the Thanos sidecar keeps retrying uploads within
+Prometheus's local retention. Loki ingested nothing until the store came back.
+Fixed by moving to PGSTY Silo (see the telemetry store entry
+[above](#upgrade-sensitive-components-read-the-changelog-first)).
+
+**Why nothing warned.** Every signal the platform watches was green until the
+pull: the pods were Running, ArgoCD Synced, and the pin had not changed.
+Renovate would not have helped either — it proposes *newer* versions, and a
+withdrawn project has none.
+
+**The check.** Ask each registry whether it still serves every image the cluster
+runs, the way a node would:
+
+```bash
+scripts/check-images-pullable.sh     # needs kubectl; read-only; exits 1 on any failure
+```
+
+Run it on the semi-annual cadence above, and before any planned node
+replacement or rebuild. A `FAIL` means: that workload goes down at the next node
+upgrade, which is at most a week away.
+
+**Signs a project is heading this way:** no chart or image release for a year,
+a licence change, "community edition" wording in release notes, or a fork
+appearing with the old project's users behind it. Bitnami (2025) and MinIO
+(2025–26) both showed these months before anything broke.
+
+**What would close the gap for good:** a copy of the images we control, e.g. an
+Azure Container Registry with pull-through cache. That is a design decision
+(cost, and one more durable resource), not done yet.
+
 ## Automating drift detection
 
 Consider adding **Renovate** (or Dependabot) to the repo. It watches the pinned
 chart/image versions and opens PRs when new versions are available — so "what is
 behind?" is answered automatically instead of by hand. Pair it with the cadence
-above: merge fast-mover PRs promptly, batch the stable ones.
+above: merge fast-mover PRs promptly, batch the stable ones. It does **not**
+detect a withdrawn image; that is
+[`check-images-pullable.sh`](#upstream-withdrawal).
 
 ## Current pins (baseline)
 
@@ -274,7 +343,7 @@ As of the initial build:
 | cert-manager | v1.21.0 |
 | Traefik | 41.0.2 (v3.7) |
 | Gateway API CRDs | v1.5.1 |
-| MinIO | 5.4.0 |
+| Telemetry store | min.io chart 5.4.0; image `pgsty/silo` RELEASE.2026-09-16 (since 2026-09-25) |
 | kube-prometheus-stack | 87.19.2 |
 | Loki / Alloy | 18.5.4 (grafana-community OSS fork) / 1.11.0 |
 | Thanos (stevehipwell) | 1.24.0 (app 0.42.2) |

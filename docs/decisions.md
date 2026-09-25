@@ -956,9 +956,12 @@ Stating the scope next to the name did not prevent the misreading: the name is
 read, the sentence after it is skimmed. So the service is named for its *job*
 instead, and the name **MinIO is deliberately kept free** for a project-facing
 object store, to be built when a project first needs one — see *Revisit when*
-below. The software is still MinIO and the charts, images and upstream labels
+below. The software is still MinIO-lineage and the chart and upstream labels
 still say so; what changed is that the platform no longer *offers* something
-called MinIO that nobody may use.
+called MinIO that nobody may use. Since 2026-09-25 the image is **PGSTY Silo**, a
+community fork, because MinIO Inc. deleted its public images
+([maintenance.md, "Upstream withdrawal"](maintenance.md#upstream-withdrawal)).
+The name made that swap a values change, not a rename.
 
 **A project-facing object store will simply be called `minio`** — the same way the
 shared database is called PostgreSQL rather than something abstract. A product
