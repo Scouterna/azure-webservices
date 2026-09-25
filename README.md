@@ -79,7 +79,7 @@ class is available for workloads that opt in.
 | **cluster-infra** | StorageClasses, cert-manager ClusterIssuers, cluster-wide NetworkPolicy | raw manifests |
 | **cert-manager** | TLS certificates (Let's Encrypt) | `cert-manager` v1.21.0 |
 | **Traefik** | Ingress controller (default class) + LoadBalancer | `traefik` 41.0.2 |
-| **telemetry store** | Object storage backing Loki + Thanos (runs MinIO; not for projects) | `minio` 5.4.0 |
+| **telemetry store** | Object storage backing Loki + Thanos (runs PGSTY Silo, a MinIO fork; not for projects) | `minio` 5.4.0 |
 | **CloudNativePG** | PostgreSQL operator + the shared PostgreSQL server | `cloudnative-pg` 0.29.0 |
 | **External Secrets** | Sync secrets from Azure Key Vault (Workload Identity) | `external-secrets` 2.8.0 |
 | **Sealed Secrets** | Commit-safe secrets projects can self-serve | `sealed-secrets` 2.19.1 |

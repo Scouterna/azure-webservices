@@ -13,6 +13,19 @@
 mode: standalone
 replicas: 1
 
+# MinIO Inc. stopped publishing images and deleted quay.io/minio/*; the chart's
+# default no longer pulls. PGSTY Silo is the maintained community fork: same
+# data format, MINIO_* env and metrics paths, and it maps the chart's `minio`
+# command to `silo`. Pinned by digest. docs/maintenance.md "Upstream withdrawal".
+image:
+  repository: docker.io/pgsty/silo
+  tag: RELEASE.2026-09-16T00-00-00Z@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46
+# For the chart's mc hook Jobs; none render today (see users: below), but a
+# re-enabled hook must not fall back to the dead registry.
+mcImage:
+  repository: docker.io/pgsty/silo
+  tag: RELEASE.2026-09-16T00-00-00Z@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46
+
 # Without this the chart names every resource <release>-minio. The Service DNS
 # name is load-bearing (Loki, Thanos and the bucket Job all address it).
 fullnameOverride: telemetry-store
@@ -40,6 +53,10 @@ existingSecret: telemetry-store-root
 # can't sync cleanly on first bring-up (before its ESO secret exists) — so the
 # buckets never appear and Thanos-store crash-loops. The standalone Job is
 # reliable and idempotent.
+
+# No chart-created users. The chart default adds a fixed-password consoleAdmin
+# user via a post-sync hook; Loki and Thanos use the root credential from ESO.
+users: []
 
 # No ingress — accessed in-cluster only. This is infrastructure storage, not a
 # service projects consume.
