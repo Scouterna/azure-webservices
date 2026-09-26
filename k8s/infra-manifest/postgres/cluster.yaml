@@ -59,9 +59,7 @@ spec:
   # 1 while the cluster is single-node: a second replica lands on the same node,
   # so it is not real HA, and it costs one of the node's 12 attachable-disk slots
   # (the binding limit here — see docs/postgres.md). Raise to 2 with a 2nd node.
-  # TEMPORARILY 2: builds a replica on disk-premium to switch over to; back to 1
-  # afterwards. docs/decisions.md entry 24.
-  instances: 2
+  instances: 1
   # At instances: 1 the PDB is unsatisfiable and blocks every node drain.
   # docs/decisions.md entry 16.
   enablePDB: false
