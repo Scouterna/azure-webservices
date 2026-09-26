@@ -653,6 +653,45 @@ once turned a stale 89s sample into a false conclusion.
 The rule costs about 0.9 ms (3,813 samples) per evaluation, against the 8.7s per evaluation it
 would have found at the 2026-09-22 plateau.
 
+**`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
+used to fire on every fresh install. That was correct, since no backup had
+succeeded and the backup path really was blind, but the `critical` route repeats
+every hour, so a worst-case install-to-first-backup window produced around 26 Slack
+posts for an expected condition. That is how a channel gets muted, and a muted
+channel looks exactly like coverage. Since 2026-09-22 a healthy install never
+reaches `for: 48h`, so this rule no longer fires there at all. The route stays:
+a genuine absence is still a standing condition.
+
+Downgrading to `warning` was the alternative and was rejected: on a cluster that has
+been up for weeks, a blind backup path is not a warning, and there is no other
+signal for it. So the severity stays honest and the *notification* is what changes —
+an explicit route ahead of the critical one gives both absence alerts a 12h repeat.
+
+The distinction that justifies it: these describe a **standing condition**, not an
+incident. Hourly re-notification tells you nothing new whether the cause is an
+install an hour old or an outage a month old. Anything else `critical` keeps the 1h
+repeat.
+
+Read these as "the rule above has gone blind", not as the underlying fault. They
+deliberately do not suppress their siblings: the chart's inhibit rules match on
+`alertname`, so a firing `VeleroBackupMetricsAbsent` still lets
+`VeleroBackupFailing` through if it can fire at all.
+
+**ESO and CNPG deliberately do not get one.** Their failures surface elsewhere — a
+workload breaks on the next rotation, and `TargetDown` covers the endpoint — so a
+companion each would add noise for little signal. The CNPG case is the weaker
+argument of the two: archiving could fail while the exporter is also down. The
+better fix there is a staleness rule on
+`cnpg_pg_stat_archiver_seconds_since_last_archival` (a metric the dashboards
+already use), which detects the actual bad state rather than the monitoring gap —
+but it needs to know whether `archive_timeout` is set, or an idle database will
+false-alarm. Left open rather than guessed.
+
+`argocd_app_info` is the exception with no corroboration in the repo, because
+**ArgoCD was not being scraped at all** — it ships metrics Services and no
+ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
+rule has a target before trusting it (install.md §11).
+
 ## Round four was not a rule group
 
 **On 2026-09-26 `NodeDiskIOSaturation` fired again, and
@@ -733,15 +772,15 @@ Prometheus — so that is what the rule uses. **Two sources are the minimum for 
 per-container IO claim here**, and node-exporter is the one that arbitrates.
 
 The threshold is **50 MB/s** with **`for: 2h`**, and the long `for:` is doing most
-of the work. Sampled back over four hours with the metric above, the idle baseline
-is not merely low but **0.00 for every container**, for hours at a stretch. The
-incident sat flat between **196 and 203** the whole time. But *investigating* the
-incident pushed Prometheus to **122 MB/s** — my own queries, the same trap this
-entry records under `for: 2h` above, and squarely inside the incident's range.
-Level alone cannot separate the two; duration can. A query session ramps and
-decays over tens of minutes, while this compaction held 200 MB/s flat for over
-three hours, so `for: 2h` fires on one and not the other. The threshold then only
-has to sit clear of zero.
+of the work. Sampled back over four hours with the metric above, the baseline is
+**0.00 for every container** whenever nobody is querying. The incident sat flat
+between **196 and 203** the whole time. But *looking at* the cluster reaches the
+same range: Prometheus hit **122 MB/s**, its disk's ceiling, twice that morning,
+both times while a Grafana dashboard was open (see the Prometheus section below).
+Level alone cannot separate the two; duration can. A dashboard session lasts tens
+of minutes, while this compaction held 200 MB/s flat for over three hours, so
+`for: 2h` fires on one and not the other. The threshold then only has to sit clear
+of zero.
 
 It deliberately does **not** catch round three's sustained floor of about 17 MB/s.
 That case belongs to `PrometheusRuleGroupExpensive`, and reaching down to 17 here
@@ -759,49 +798,63 @@ refault rate, which cAdvisor does not export, leaving the disk read as the proxy
 saturated, instant queries measured at 1.5 ms were taking tens of seconds and
 loading it further. Sampling the same expression at a handful of past timestamps
 cost almost nothing and answered the question, which is the technique to reach for
-first on a disk that is already in trouble. That sweep is also what drove
-Prometheus to 122 MB/s, so it produced the calibration figure it was interfering
-with — a reminder that on a one-node cluster the measurement is part of the load.
+first on a disk that is already in trouble. This section first blamed that sweep
+for Prometheus's 122 MB/s; a Grafana dashboard was open over the same minutes, and
+the same plateau came back an hour later with no sweep running. On a one-node
+cluster, whoever is looking is part of the load.
 
+## Prometheus had the same limit
 
-**`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
-used to fire on every fresh install. That was correct, since no backup had
-succeeded and the backup path really was blind, but the `critical` route repeats
-every hour, so a worst-case install-to-first-backup window produced around 26 Slack
-posts for an expected condition. That is how a channel gets muted, and a muted
-channel looks exactly like coverage. Since 2026-09-22 a healthy install never
-reaches `for: 48h`, so this rule no longer fires there at all. The route stays:
-a genuine absence is still a standing condition.
+**A normal dashboard saturated the Prometheus disk, because Prometheus had the
+same page-cache limit as the compactor.** Its container was limited to `600Mi`
+with about 520 MB resident, leaving about **70 MB** of page cache for a 5.7 GB
+TSDB.
 
-Downgrading to `warning` was the alternative and was rejected: on a cluster that has
-been up for weeks, a blind backup path is not a warning, and there is no other
-signal for it. So the severity stays honest and the *notification* is what changes —
-an explicit route ahead of the critical one gives both absence alerts a 12h repeat.
+On 2026-09-26 between 08:53 and 09:14Z it read a flat **122 MB/s**, the disk's
+ceiling, from its own volume (node-exporter and blkio agree). In those 21 minutes
+it served **437 `query_range` requests**, against none in a quiet window of the
+same length, and spent about 14,000 query-seconds on them: roughly eleven queries
+in flight at once. Rule evaluations timed out (`KubePersistentVolumeFillingUp`:
+"query timed out in expression evaluation"), and the 09:00 head compaction took
+**14m29s** against 1-2 s for every other cycle in 36 hours. It started only after
+the reads did, so it was a casualty, not the cause.
 
-The distinction that justifies it: these describe a **standing condition**, not an
-incident. Hourly re-notification tells you nothing new whether the cause is an
-install an hour old or an outage a month old. Anything else `critical` keeps the 1h
-repeat.
+The load was one browser tab: **Kubernetes / Compute Resources / Cluster** at a
+12h range. That dashboard ships with **`refresh: 10s`** and **44 queries**.
+Grafana logged every panel failing (989 `400`s at about 10 s, and 47 `500`s at
+30 s on the `cluster` variable lookup). Grafana abandons a query at that point;
+Prometheus keeps evaluating it for up to its 2-minute `--query.timeout`, and the
+next refresh stacks another set on top. Where Grafana's ~10 s cutoff comes from
+was not found — the datasource sets no timeout.
 
-Read these as "the rule above has gone blind", not as the underlying fault. They
-deliberately do not suppress their siblings: the chart's inhibit rules match on
-`alertname`, so a firing `VeleroBackupMetricsAbsent` still lets
-`VeleroBackupFailing` through if it can fire at all.
+**The cost is the limit, not the query.** Two of that dashboard's panels, run one
+at a time against an otherwise idle Prometheus, 12h at a 60 s step:
 
-**ESO and CNPG deliberately do not get one.** Their failures surface elsewhere — a
-workload breaks on the next rotation, and `TargetDown` covers the endpoint — so a
-companion each would add noise for little signal. The CNPG case is the weaker
-argument of the two: archiving could fail while the exporter is also down. The
-better fix there is a staleness rule on
-`cnpg_pg_stat_archiver_seconds_since_last_archival` (a metric the dashboards
-already use), which detects the actual bad state rather than the monitoring gap —
-but it needs to know whether `archive_timeout` is set, or an idle database will
-false-alarm. Left open rather than guessed.
+| panel | time | read from disk, run 1 / run 2 |
+|---|---|---|
+| memory RSS by namespace | 6-7 s | 732 / 827 MB |
+| network receive rate by namespace | 7-9 s | 1,057 / 902 MB |
 
-`argocd_app_info` is the exception with no corroboration in the repo, because
-**ArgoCD was not being scraped at all** — it ships metrics Services and no
-ServiceMonitor, so `governance/servicemonitor-argocd.yaml` adds one. Confirm that
-rule has a target before trusting it (install.md §11).
+Twelve hours of blocks occupy about **310 MB** (six 2h blocks averaging 52 MB),
+plus 94 MB of head chunks. One query read more than twice that, and the second run
+was no cheaper: it evicts its own pages before it has finished with them. Every
+byte of it was a refault.
+
+**It is not a cycle.** The first suspicion was that the head's growth toward each
+2h cut squeezed the cache on its own. The 11:00Z cut was watched at 20 s
+resolution and was clean: 1.69 s, one 20-second refault burst, then idle. Without
+someone querying, nothing happens.
+
+**`2Gi` limit, `1Gi` request.** Resident memory plus a cached 12h window (~410
+MB) is about 0.93 GB, which the request now reserves. The limit leaves about 1.6
+GB for cache, roughly two days of blocks; longer ranges still read from disk.
+Node memory requests go from 36% to 42%.
+
+**It stays unalerted, deliberately.** An episode lasts as long as a dashboard
+stays open, so it satisfies neither `for: 2h` on `ContainerDiskReadSustained` or
+`PrometheusRuleGroupExpensive`, nor `NodeDiskIOSaturation`'s 30 minutes. That is
+the intended trade — nobody is paged because someone is looking — so the fix is to
+make looking cheap, not to alert on it.
 
 ## 12. GitOps is ArgoCD, not Flux
 
