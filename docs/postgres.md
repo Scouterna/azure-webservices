@@ -219,10 +219,11 @@ relying on it; it costs a few minutes and is the only thing that proves the path
      namespace: postgres
    spec:
      instances: 1
-     imageName: ghcr.io/cloudnative-pg/postgresql:17
+     # The exact imageName from k8s/infra-manifest/postgres/cluster.yaml.
+     imageName: ghcr.io/cloudnative-pg/postgresql:17.11-202609210816-standard-trixie
      storage:
        size: 32Gi
-       storageClass: disk-standardssd
+       storageClass: disk-premium
      bootstrap:
        recovery:
          source: shared-origin
