@@ -37,6 +37,11 @@ grafana:
           - grafana.infra.ws.scouterna.net
 
   grafana.ini:
+    # The bundled dashboards refresh every 10s; data arrives every 30s, and a
+    # refresh shorter than a slow query stacks it on the disk. Paired with the
+    # Prometheus query.timeout below. decisions.md entry 11.
+    dashboards:
+      min_refresh_interval: 1m
     server:
       domain: grafana.infra.ws.scouterna.net
       root_url: https://grafana.infra.ws.scouterna.net
@@ -147,6 +152,10 @@ prometheus:
     # 0: here that means the 15d default, not "forever". docs/decisions.md entry 19.
     retention: 15d
     retentionSize: 12GB
+    # 1m, not the 2m default: no query outlives the dashboard refresh after it.
+    # A cluster-wide 7d panel cannot finish in 2m either. decisions.md entry 11.
+    query:
+      timeout: 1m
     # Thanos sidecar: uploads Prometheus TSDB blocks to the telemetry store's `thanos`
     # bucket (config in the thanos-objstore secret) for long-term/HA metrics.
     # Thanos Query/Store/Compactor read the same bucket.
