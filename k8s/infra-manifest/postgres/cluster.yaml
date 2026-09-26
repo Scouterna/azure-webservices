@@ -65,10 +65,11 @@ spec:
   # At instances: 1 the PDB is unsatisfiable and blocks every node drain.
   # docs/decisions.md entry 16.
   enablePDB: false
-  # Debian 13. The bare `17` tag is CNPG's legacy image on Debian 11 (EOL).
-  imageName: ghcr.io/cloudnative-pg/postgresql:17-standard-trixie
+  # Pinned build, bumped deliberately (docs/maintenance.md). Debian 13; the bare
+  # `17` tag is CNPG's legacy image on Debian 11 (EOL).
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-202609210816-standard-trixie
   storage:
-    size: 32Gi                     # v2 bills per GiB; speed doesn't depend on size.
+    size: 32Gi                     # Premium SSD v2 bills per GiB; speed doesn't depend on size.
     storageClass: disk-premium     # commit latency — docs/decisions.md entry 24.
   # Every project database lives here, so this is sized for the sum of many
   # small ones, not for one workload.

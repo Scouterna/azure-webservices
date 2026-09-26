@@ -24,7 +24,7 @@ Based on each project's real release velocity and blast radius:
 
 | Cadence | Components | Notes |
 |---|---|---|
-| **Quarterly** (fast-movers) | kube-prometheus-stack, Traefik, ArgoCD, Grafana/Loki/Alloy | Release often; chart-major bumps can change values. Review changelogs. |
+| **Quarterly** (fast-movers) | kube-prometheus-stack, Traefik, ArgoCD, Grafana/Loki/Alloy, the shared Postgres image | Release often; chart-major bumps can change values. Review changelogs. The Postgres image is a pinned CNPG build tag (`imageName` in `postgres/cluster.yaml`); bump it after each PostgreSQL minor release (Feb/May/Aug/Nov). |
 | **Semi-annual** (stable) | cert-manager, telemetry store, CloudNativePG, Thanos, Headlamp, External Secrets, Gateway API CRDs | Slower cadence, fewer breaking changes. Bump the Gateway API CRDs in step with Traefik (see below). The telemetry store's image is pinned in its values file, not by `targetRevision` (see below). |
 | **Semi-annual** (upstream health) | every image the cluster runs | `scripts/check-images-pullable.sh` — see [Upstream withdrawal](#upstream-withdrawal). A pin that no longer exists upstream breaks on the next node upgrade. |
 | **Quarterly** (audit health) | the audit log pipeline | Confirm rows are still arriving and the daily cap has not been hit — `install.md` §11. The Azure alerts catch both faster, but this is the check that does not depend on them. |
