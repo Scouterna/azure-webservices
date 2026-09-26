@@ -33,6 +33,7 @@ say why rather than deleting it.
 | [21](#21-a-project-may-commit-its-own-sealedsecrets-plain-secret-stays-out) | A project may commit its own `SealedSecret`s; plain `Secret` stays out | current |
 | [22](#22-reserved-hostnames-are-enforced-at-admission) | Reserved hostnames are enforced at admission | current, amends 8 |
 | [23](#23-the-files-shared-account-key-is-kept-out-of-tenant-namespaces) | The `files-shared` account key is kept out of tenant namespaces | current |
+| [24](#24-the-shared-postgres-runs-on-premium-ssd-v2-everything-else-stays-on-standard-ssd) | The shared Postgres runs on Premium SSD v2; everything else stays on Standard SSD | current |
 
 ---
 
@@ -1259,7 +1260,7 @@ the four tiers bill in a way that a project would not predict:
 |---|---|
 | ConfigMap / PostgreSQL | no marginal cost — already provisioned |
 | `files-shared` | **per GB used *and per operation*** |
-| `disk-*` | fixed per E-tier, regardless of use; transactions negligible |
+| `disk-*` | fixed per E-tier (`disk-standardssd`) or per GiB (`disk-premium`), regardless of use; transactions negligible |
 
 **`files-shared` is the cheap tier for storage and the expensive one for
 traffic**, and the crossover is lower than it looks. Storage is roughly a tenth
@@ -1660,3 +1661,65 @@ secret namespace, and each pod read and wrote its own share. `kubectl auth can-i
 as the project's group returned `no` for the key Secret, for listing secrets
 cluster-wide, and for reading PVs. To re-verify, repeat that and check
 `kubectl get secret -A | grep azure-storage-account` lists `kube-system` only.
+
+## 24. The shared Postgres runs on Premium SSD v2; everything else stays on Standard SSD
+
+**Current.** `disk-premium`
+([`storageclass/disk-premium.yaml`](../k8s/infra-manifest/cluster-infra/storageclass/disk-premium.yaml))
+is `PremiumV2_LRS` at 3,000 IOPS / 125 MB/s, the baseline included in the price.
+The shared Postgres uses it. Every other disk PVC stays on `disk-standardssd`.
+
+**Why Postgres.** A database waits on one WAL flush per commit, so write
+latency, not read throughput, is what makes it feel fast. Measured on fresh
+32 GiB disks on the live node (2026-09-26):
+
+| | `disk-standardssd` (E4) | `disk-premium` (v2) |
+|---|---|---|
+| 8 kB write + `fdatasync`, mean / p99 / p99.9 | 1.64 / 11.1 / 26.6 ms | 0.72 / 1.6 / 4.2 ms |
+| random 8 kB write, 16 deep | 610 IOPS | 3,105 IOPS |
+| pgbench TPC-B, 1 / 16 clients | 392 / 816 tps | 584 / 1,437 tps |
+| random 8 kB read, 16 deep | **14,271 IOPS** (host cache) | 3,563 IOPS |
+
+The price is about the same. v2 is billed per GiB rather than rounded up to a
+tier: 32 GiB is ~24 SEK/month at list price against 22.85 for an E4.
+
+**Why not everything.** Standard SSD PVCs get the VM's ReadOnly host cache,
+while v2 has none, so v2 loses cached random reads by 4x (last row). Prometheus,
+Loki, the telemetry store, Grafana and Alertmanager are read-heavy and their data
+is derived, so they would give up the one thing they use.
+
+**Rejected: Premium SSD v1**, which this class used to be. v1 performance scales
+with size: at 32 GiB (P4) it is 120 IOPS / 25 MB/s, a quarter of the E4 it would
+have replaced, and 200 MB/s takes a 1 TiB P30.
+
+**Not a reason either way: Standard SSD operation charges.** They look large on
+paper, but the bill for 17–25 September 2026 showed ~3 SEK/month across all six
+data disks, because the host cache absorbs most operations.
+
+**Also examined: the OS disk** (P10, 206 SEK/month, the largest disk line). AKS
+exposes no OS-disk SKU, only `Managed`/`Ephemeral` and a size. Ephemeral needs
+`Standard_D4ds_v6`, which costs 354 SEK/month more to remove a 206 SEK disk. It
+stays.
+
+**Backups: v2 snapshots are slow but Velero waits for them.** A v2 snapshot
+copies in the background, and snapshots of one disk are copied one at a time.
+At 32 GiB it took ~16 minutes to reach `readyToUse`, against seconds for
+Standard SSD. Velero waits for that under `itemOperationTimeout` (4 h), not the
+10-minute `csiSnapshotTimeout`, so the weekly backup just runs longer. Restoring
+a v2 snapshot gives a disk that mounts at once and is slower until it has
+hydrated.
+
+**Upgrading a cluster where `disk-premium` is still v1: delete the class
+before anything uses it.** The parameters are immutable, as in
+[entry 23](#23-the-files-shared-account-key-is-kept-out-of-tenant-namespaces), so
+run `kubectl delete storageclass disk-premium` and check the recreated class shows
+`PremiumV2_LRS`. **Order matters:** a PVC created while the old class exists is
+provisioned as v1 and stays v1. Move the Postgres onto the class only after
+that check.
+
+**Verified live (2026-09-26, AKS 1.36, Velero 1.18.1).** The numbers above, plus a
+Velero `Backup` of a namespace holding an E4 and a v2 PVC: `Completed`, 2/2
+snapshots, no errors, in 12 minutes. A PVC restored from the v2 snapshot mounted
+in 34 s with its data intact. To re-verify, run `pg_test_fsync` inside the
+Postgres pod. It should report about 0.7 ms for `fdatasync`; a result near
+1.6 ms means the volume is not v2.
