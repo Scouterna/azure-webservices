@@ -140,8 +140,9 @@ spec:
               is down.
 
         # --- The monitoring stack's own cost --------------------------
-        # Three NodeDiskIOSaturation rounds were all caused by one rule group
-        # out-reading the Prometheus disk, and all three were found by hand.
+        # Four NodeDiskIOSaturation rounds, every one found by hand. Three were a
+        # rule group out-reading the Prometheus disk; the fourth was not a rule
+        # group at all, so there are two rules here. decisions.md entry 11.
 
         - alert: PrometheusRuleGroupExpensive
           # Sustained duty cycle, not peak: a group can dominate the disk for
@@ -168,6 +169,29 @@ spec:
               long-range dashboard or query) first. Otherwise find the rule with
               /api/v1/rules (evaluationTime per rule), then widen the group's
               interval or narrow the rule's range selector.
+
+        - alert: ContainerDiskReadSustained
+          # NodeDiskIOSaturation names a device; this names the container, the step
+          # that has cost time every round. blkio, NOT container_fs_reads_bytes_total
+          # — that one over-reported Prometheus 50x against both node-exporter and
+          # /proc. for: 2h because investigating this cluster reads almost as hard as
+          # an incident does; only the incident stays flat. decisions.md entry 11.
+          expr: |
+            sum by (namespace, pod, container) (
+              rate(container_blkio_device_usage_total{operation="Read", container!=""}[15m])
+            ) > 50e6
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} has read {{ $value | humanize }}B/s from disk for 2h"
+            description: >-
+              One container is sustaining disk reads far above anything healthy on
+              this cluster. Check its memory limit first: if working set sits just
+              under the limit while oom_kill stays 0, it is refaulting page cache,
+              not doing work — compare memory.current against memory.max in the
+              cgroup and raise the limit. Otherwise look for a large range query
+              or an unbounded scan.
 
         - alert: ArgoCDAppNotSynced
           # If ArgoCD stops converging, every control in this repo silently stops
