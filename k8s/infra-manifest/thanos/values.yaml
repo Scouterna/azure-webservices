@@ -43,7 +43,10 @@ storeGateway:
     limits: { memory: 512Mi }
 
 # Compactor: compaction + downsampling + retention on the bucket.
-# persistence off for the same reason — this volume is compaction scratch space.
+# persistence off for the same reason, but this volume is not a cache like the
+# store gateway's: it holds the whole compaction working set, on the node's OS
+# disk, which no disk budget covers. It stays an emptyDir only because enough
+# page cache keeps a compaction reading its sources once. decisions.md entry 11.
 compact:
   enabled: true
   # Thanos retention 0 = keep FOREVER (the opposite of Prometheus, where 0 means
@@ -56,8 +59,12 @@ compact:
   persistence:
     enabled: false
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 512Mi }
+    # 4Gi, not 512Mi: page cache is charged to the cgroup, and compaction streams
+    # every source block plus a 512Mi output segment. Too small and it refaults
+    # instead of caching — 190 MB/s for hours, 1.4 TB to merge 882 MB.
+    # decisions.md entry 11.
+    requests: { cpu: 50m, memory: 512Mi }
+    limits: { memory: 4Gi }
 
 # Not needed for this single-cluster setup.
 receive:

@@ -653,6 +653,117 @@ once turned a stale 89s sample into a false conclusion.
 The rule costs about 0.9 ms (3,813 samples) per evaluation, against the 8.7s per evaluation it
 would have found at the 2026-09-22 plateau.
 
+## Round four was not a rule group
+
+**On 2026-09-26 `NodeDiskIOSaturation` fired again, and
+`PrometheusRuleGroupExpensive` stayed quiet — correctly.** That silence is what
+established within a minute that the rule engine was not the cause this time, so
+the rule earned its place by not firing.
+
+**Two things about the alert itself pointed the wrong way.** The device was
+`nvme0n1`, the node's **128 GB OS disk, not a data disk at all**. And every
+device name had shifted, because the node had been rebuilt 31 hours earlier:
+`nvme0n6`, the Prometheus TSDB in round three, was now Loki. **Only
+`/dev/disk/azure/data/by-lun` survives a node rebuild** — a device name written
+down in a runbook, or earlier in this file, does not.
+
+The reader was `thanos-compact`, at **203 MB/s and 890 read IOPS against 0.15
+MB/s of writes**, agreed by node-exporter, cAdvisor and `/proc/<pid>/io`. Its
+`--data-dir` is an `emptyDir`, so compaction scratch lands on the OS disk, which
+no disk budget here covers.
+
+**The cause was its own memory limit, by way of the page cache.** Page cache is
+charged to the cgroup, so a `512Mi` limit also caps how much of its working set
+the compactor may keep:
+
+| | |
+|---|---|
+| `memory.max` vs `memory.current` | 512 MiB, at **99.91%** |
+| of which anonymous / page cache | 239 MB / **266 MB** |
+| source blocks in the planned group | 6 blocks, **882 MB** |
+| plus the output chunk segment | 512 MiB, preallocated |
+| `workingset_refault_file` per 15 s | **+745,204 pages = 3.05 GB** |
+| disk reads over the same 15 s | **2.89 GB** — the refaults *are* the reads |
+| `memory.events` max vs `oom_kill` | 482 vs **0** |
+
+It cannot hold 1.4 GB of files in 266 MB, so every read evicts a page it is about
+to want again, and `pgsteal` tracked the read rate exactly. Output advanced **8
+MiB per 75 s** while reading 192 MB/s; the run reached **1.4 TB read to merge 882
+MB**, roughly 1750x amplification, with node-wide IO pressure at `full
+avg300=69%`. The control case sits eleven seconds earlier in the same log: a
+4-block, 228 MB group compacted in **3.6 s**. This is a cache-size cliff, and the
+compaction ladder (2h, 8h, 2d) guaranteed reaching it once six 8h blocks existed.
+
+**Each of the three things that hid it is worth naming, because each one argues
+for a hypothesis that is wrong:**
+
+- **It looks idle.** Prometheus reads chunks with positional `pread`, so every
+  source file descriptor sits at offset 0 and there were **9 major faults per 15
+  s**. Page-cache thrashing with no major faults is not the `mmap` kind, and the
+  absence of faults is not evidence against thrashing.
+- **The node had 11 GB free.** Node-level memory is beside the point; the cgroup
+  is the constraint. CPU read **0.08 cores** for the same reason — a process
+  waiting on IO is not on the CPU, so low CPU is not evidence against heavy IO.
+- **`oom_kill` stayed 0, and so did `thanos_compact_halted`.** A container pinned
+  at its limit and refaulting is a steady state, not a crash. Nothing in the chart
+  or in this file covered it.
+
+**Raising the limit to `4Gi` is the fix; moving the scratch to a PVC is not.** The
+PVC is the obvious change and the wrong one: it spends one of the node's 12 disk
+attachments, of which the platform already holds 6 (entry 18), and it relocates
+the thrash instead of ending it. Given cache to work in, a compaction reads its
+sources once — about 900 MB, briefly — and an `emptyDir` is the right home for it.
+
+**`ContainerDiskReadSustained` names the container, because
+`NodeDiskIOSaturation` names only a device.** That translation cost real time in
+both rounds anyone investigated, and this time the device name had moved
+underneath it. Reads only, because the signature of this failure is heavy reads
+against almost no writes.
+
+**It does not use `container_fs_reads_bytes_total`, which is wrong on this
+cluster.** That was the first choice, and it would have shipped an alert naming
+an innocent container. While the compactor was thrashing, that metric reported
+the Prometheus container reading **97.6 MB/s from `nvme0n4`** — a device that
+node-exporter put at **1.98 MB/s**, and that `/proc/<pid>/io` put at zero. A
+container cannot read 50x more from a disk than the disk delivers. It was right
+about the compactor (202.44 against node-exporter's 202.60) and invented the rest.
+`container_blkio_device_usage_total{operation="Read"}` agrees with the device on
+both at once — 195.8 against 202.6 for the compactor, 1.88 against 1.98 for
+Prometheus — so that is what the rule uses. **Two sources are the minimum for a
+per-container IO claim here**, and node-exporter is the one that arbitrates.
+
+The threshold is **50 MB/s** with **`for: 2h`**, and the long `for:` is doing most
+of the work. Sampled back over four hours with the metric above, the idle baseline
+is not merely low but **0.00 for every container**, for hours at a stretch. The
+incident sat flat between **196 and 203** the whole time. But *investigating* the
+incident pushed Prometheus to **122 MB/s** — my own queries, the same trap this
+entry records under `for: 2h` above, and squarely inside the incident's range.
+Level alone cannot separate the two; duration can. A query session ramps and
+decays over tens of minutes, while this compaction held 200 MB/s flat for over
+three hours, so `for: 2h` fires on one and not the other. The threshold then only
+has to sit clear of zero.
+
+It deliberately does **not** catch round three's sustained floor of about 17 MB/s.
+That case belongs to `PrometheusRuleGroupExpensive`, and reaching down to 17 here
+would put the threshold under the level a person reaches just by looking at
+Prometheus.
+
+**The obvious memory alert does not work, and was not added.** Working set over
+limit read **0.83** during the thrash, nowhere near the >0.95 such a rule needs,
+because refaulted cache counts as `inactive_file` and working set excludes it.
+`container_spec_memory_limit_bytes` is not exposed on this cluster at all; the
+limits come from `kube_pod_container_resource_limits`. The honest signal is the
+refault rate, which cAdvisor does not export, leaving the disk read as the proxy.
+
+**A four-day sweep was abandoned rather than trusted.** With the disk already
+saturated, instant queries measured at 1.5 ms were taking tens of seconds and
+loading it further. Sampling the same expression at a handful of past timestamps
+cost almost nothing and answered the question, which is the technique to reach for
+first on a disk that is already in trouble. That sweep is also what drove
+Prometheus to 122 MB/s, so it produced the calibration figure it was interfering
+with — a reminder that on a one-node cluster the measurement is part of the load.
+
+
 **`VeleroBackupMetricsAbsent` stays `critical`, but does not repeat hourly.** It
 used to fire on every fresh install. That was correct, since no backup had
 succeeded and the backup path really was blind, but the `critical` route repeats

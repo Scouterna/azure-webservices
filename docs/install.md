@@ -1281,7 +1281,7 @@ An empty `result` array means the scrape is not working — check the ServiceMon
 selector still matches ArgoCD's `argocd-metrics` Service labels, which the upstream
 manifest owns and can change on an ArgoCD upgrade.
 
-Two of the nine rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
+Two of the ten rules exist to catch exactly that: `ArgoCDMetricsAbsent` and
 `VeleroBackupMetricsAbsent` fire when the metric they depend on has gone missing, so
 a broken scrape reports itself instead of looking like a healthy cluster.
 
