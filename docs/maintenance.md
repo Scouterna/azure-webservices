@@ -232,7 +232,7 @@ retention). Per volume:
 
 | PVC | Size | If lost |
 |---|---|---|
-| `postgres/shared-1` | 32Gi | **Own CNPG backup at 02:30** — the real protection; Velero is secondary |
+| `postgres/shared-<n>` | 32Gi | **Own CNPG backup at 02:30** — the real protection; Velero is secondary |
 | `telemetry-store/telemetry-store` | 64Gi | Backing store for Loki + Thanos. **Weekly is the only copy** — see below |
 | `monitoring/prometheus` | 32Gi | Recent metrics; long-term copies live in Thanos → telemetry store |
 | `monitoring/loki` | 16Gi | Recent logs; chunks ship to the telemetry store |

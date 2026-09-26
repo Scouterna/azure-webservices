@@ -59,14 +59,17 @@ spec:
   # 1 while the cluster is single-node: a second replica lands on the same node,
   # so it is not real HA, and it costs one of the node's 12 attachable-disk slots
   # (the binding limit here — see docs/postgres.md). Raise to 2 with a 2nd node.
-  instances: 1
+  # TEMPORARILY 2: builds a replica on disk-premium to switch over to; back to 1
+  # afterwards. docs/decisions.md entry 24.
+  instances: 2
   # At instances: 1 the PDB is unsatisfiable and blocks every node drain.
   # docs/decisions.md entry 16.
   enablePDB: false
-  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  # Debian 13. The bare `17` tag is CNPG's legacy image on Debian 11 (EOL).
+  imageName: ghcr.io/cloudnative-pg/postgresql:17-standard-trixie
   storage:
-    size: 32Gi                     # exact Azure SSD tier (E4). Grow by tier.
-    storageClass: disk-standardssd
+    size: 32Gi                     # v2 bills per GiB; speed doesn't depend on size.
+    storageClass: disk-premium     # commit latency — docs/decisions.md entry 24.
   # Every project database lives here, so this is sized for the sum of many
   # small ones, not for one workload.
   resources:
