@@ -221,6 +221,9 @@ alertmanager:
         slack_configs:
           - channel: '#webservices-alerts'
             send_resolved: true
+            # Default link is the in-cluster Alertmanager Service, which nothing
+            # exposes; Grafana shows the same alerts behind SSO.
+            title_link: https://grafana.infra.ws.scouterna.net/alerting/groups
             title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}'
             text: >-
               {{ range .Alerts }}*{{ .Labels.severity }}* {{ .Annotations.summary }}
