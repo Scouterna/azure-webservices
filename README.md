@@ -70,7 +70,9 @@ filesystem, or a PersistentVolumeClaim — see
 [onboarding.md](docs/onboarding.md).
 
 Persistent volumes use a cheap StandardSSD StorageClass by default; a Premium
-class is available for workloads that opt in.
+SSD v2 class, at about the same price, is available for workloads that wait on
+writes, such as the shared PostgreSQL
+([decisions.md entry 24](docs/decisions.md#24-the-shared-postgres-runs-on-premium-ssd-v2-everything-else-stays-on-standard-ssd)).
 
 ### Common services
 
