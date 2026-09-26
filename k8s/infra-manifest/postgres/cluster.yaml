@@ -69,7 +69,7 @@ spec:
   # `17` tag is CNPG's legacy image on Debian 11 (EOL).
   imageName: ghcr.io/cloudnative-pg/postgresql:17.11-202609210816-standard-trixie
   storage:
-    size: 32Gi                     # Premium SSD v2 bills per GiB; speed doesn't depend on size.
+    size: 32Gi                     # Premium SSD v2: size is capacity and cost; speed is set by the class.
     storageClass: disk-premium     # commit latency — docs/decisions.md entry 24.
   # Every project database lives here, so this is sized for the sum of many
   # small ones, not for one workload.
