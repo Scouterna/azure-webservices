@@ -856,6 +856,44 @@ stays open, so it satisfies neither `for: 2h` on `ContainerDiskReadSustained` or
 the intended trade — nobody is paged because someone is looking — so the fix is to
 make looking cheap, not to alert on it.
 
+**Verified after the change: up to two days is fixed, seven days is not.** With
+`2Gi`, the same two 12h panels took **0.15-0.20 s and read nothing from disk**.
+Opening the dashboard at 12h and 2d was fast. At **7d** the old failure came back
+at once: 116 MB/s off the disk, every byte a refault, the limit hit ~240 times a
+second, node IO pressure `full` ~73%. Seven days is about 84 blocks, ~4.4 GB,
+against ~1.5 GB of cache. A sweep larger than the cache, repeated on every
+refresh, finds each page gone before it comes round again, so no limit this node
+can afford changes it. Caching the full 15-day retention would take ~10 GB.
+
+**Narrowing the query to one pod does not rescue it either.** Run alone over 7d:
+
+| query | time | read from disk, run 1 / run 2 |
+|---|---|---|
+| CPU of one pod (`loki-0`), 2 series | 25 / 43 s | 3.0 / 5.3 GB |
+| throttling of one pod, no data at all | 5.6 / 0.4 s | 728 / 91 MB |
+| cluster-wide memory by namespace | timed out at 2m | 17.7 GB |
+
+A query that finds nothing still read 728 MB cold, just from opening 84 blocks'
+indexes. At this range **block count is the cost, not series count** — the same
+mechanism as round three. Prometheus here never compacts past 2h blocks because the
+Thanos sidecar owns compaction, while the compactor merges the same data in the
+bucket into 8h and then 2-day blocks (it built one on 2026-09-26). The two-series figure also includes what the
+eviction cost the rule evaluations running alongside, so it is an upper bound, not
+the query's own cost.
+
+**So long ranges are a routing question, and the cheap part is two guards.**
+Grafana's `min_refresh_interval` is `1m`: the bundled dashboards ship with
+`refresh: 10s` against a 30s scrape, so two refreshes in three fetched nothing new.
+Prometheus's `query.timeout` is `1m`, down from the 2m default, so a query cannot
+outlive the refresh after it and stack under the next one. The pod query above
+still completes; the cluster-wide 7d panel fails in one minute instead of two,
+having never been able to finish. The timeout also bounds rule evaluations, which
+take milliseconds when the disk is not contended. Neither guard makes seven days
+fast. Serving long ranges from the bucket's compacted, downsampled blocks through
+Thanos is the open question — including whether the sidecar, which serves
+Prometheus's own raw data for its whole retention, would still route them to this
+disk.
+
 ## 12. GitOps is ArgoCD, not Flux
 
 **Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
