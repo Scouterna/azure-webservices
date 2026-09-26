@@ -155,12 +155,15 @@ prometheus:
         existingSecret:
           name: thanos-objstore
           key: objstore.yml
+    # Page cache is charged to this limit. RSS is ~520 MB, so 600Mi left ~70 MB
+    # to cache blocks, and one 12h dashboard query re-read ~800 MB of a ~400 MB
+    # window. Request covers RSS + a cached 12h window. decisions.md entry 11.
     resources:
       requests:
         cpu: 50m
-        memory: 200Mi
+        memory: 1Gi
       limits:
-        memory: 600Mi
+        memory: 2Gi
     storageSpec:
       volumeClaimTemplate:
         spec:
