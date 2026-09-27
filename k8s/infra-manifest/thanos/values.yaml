@@ -21,6 +21,10 @@ query:
   enabled: true
   enableDnsDiscovery: true
   replicas: 1
+  # The bucket keeps raw samples 10d; without this Thanos reads raw only, so a
+  # longer range cannot use the 5m/1h tiers. decisions.md entry 25.
+  extraArgs:
+    - --query.auto-downsampling
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 384Mi }

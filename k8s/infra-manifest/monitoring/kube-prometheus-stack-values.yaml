@@ -112,13 +112,24 @@ grafana:
     # Thanos Query — long-term / HA metrics (federates the live Prometheus
     # sidecar + the object-backed store gateway). Prometheus-compatible API on
     # the thanos-query service (HTTP port 10902).
+    # The DEFAULT, so bundled dashboards read old data from the bucket's merged
+    # blocks, not Prometheus's 2h ones (bucket-only, a 7d panel took 1.2s, not a
+    # timeout).
+    # decisions.md entry 25.
     - name: Thanos
       uid: thanos
       type: prometheus
       access: proxy
       url: http://thanos-query.monitoring.svc.cluster.local:10902
+      isDefault: true
       jsonData:
         timeInterval: 30s
+
+  # The chart's own "Prometheus" datasource stays (vendored dashboards pin its
+  # uid), but must not be the default: only one can be.
+  sidecar:
+    datasources:
+      isDefaultDatasource: false
 
 # API-server SLO burn-rate rules. Disabled for the same reason as the three
 # components below: AKS runs the API server, so these are for operators of a
@@ -164,6 +175,10 @@ prometheus:
         existingSecret:
           name: thanos-objstore
           key: objstore.yml
+      # Serve only the last 2d; older queries go to the bucket. The sidecar pins
+      # Prometheus to 2h blocks, so 7d here is 84 block indexes. Prometheus keeps
+      # its own 15d for rules. decisions.md entry 25.
+      minTime: -2d
     # Page cache is charged to this limit. RSS is ~520 MB, so 600Mi left ~70 MB
     # to cache blocks, and one 12h dashboard query re-read ~800 MB of a ~400 MB
     # window. Request covers RSS + a cached 12h window. decisions.md entry 11.
