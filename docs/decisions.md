@@ -34,6 +34,7 @@ say why rather than deleting it.
 | [22](#22-reserved-hostnames-are-enforced-at-admission) | Reserved hostnames are enforced at admission | current, amends 8 |
 | [23](#23-the-files-shared-account-key-is-kept-out-of-tenant-namespaces) | The `files-shared` account key is kept out of tenant namespaces | current |
 | [24](#24-the-shared-postgres-runs-on-premium-ssd-v2-everything-else-stays-on-standard-ssd) | The shared Postgres runs on Premium SSD v2; everything else stays on Standard SSD | current |
+| [25](#25-dashboards-read-old-data-from-the-bucket-not-from-prometheus) | Dashboards read old data from the bucket, not from Prometheus | current |
 
 ---
 
@@ -890,10 +891,8 @@ outlive the refresh after it and stack under the next one. The pod query above
 still completes; the cluster-wide 7d panel fails in one minute instead of two,
 having never been able to finish. The timeout also bounds rule evaluations, which
 take milliseconds when the disk is not contended. Neither guard makes seven days
-fast. Serving long ranges from the bucket's compacted, downsampled blocks through
-Thanos is the open question — including whether the sidecar, which serves
-Prometheus's own raw data for its whole retention, would still route them to this
-disk.
+fast. Reading long ranges from the bucket instead is entry 25: through Thanos they
+take about a second, once the sidecar stops serving Prometheus's own copy of them.
 
 ## 12. GitOps is ArgoCD, not Flux
 
@@ -1761,3 +1760,77 @@ snapshots, no errors, in 12 minutes. A PVC restored from the v2 snapshot mounted
 in 34 s with its data intact. To re-verify, run `pg_test_fsync` inside the
 Postgres pod. It should report about 0.7 ms for `fdatasync`; a result near
 1.6 ms means the volume is not v2.
+
+## 25. Dashboards read old data from the bucket, not from Prometheus
+
+**Grafana's default datasource is Thanos, and the Prometheus sidecar serves only
+the last two days.** Anything older is read from the bucket, where the compactor
+has merged Prometheus's 2h blocks into larger ones.
+
+**Why: at long ranges the cost is the number of blocks.** The sidecar needs
+Prometheus to cut 2h blocks and never merge them — the operator sets
+`--storage.tsdb.min-block-duration=2h` and `max-block-duration=2h` whenever the
+sidecar is on. So seven days is 84 blocks, and a query opens every block's index
+before it finds anything: a 7d query that matched no series still read 728 MB
+(entry 11). With Prometheus at `2Gi`, a 7d dashboard saturated its disk for as
+long as it stayed open, and a cluster-wide panel never finished.
+
+The legacy `webservices` cluster made the cause plain. Its Prometheus runs the
+same chart with the same 15d retention, 12 GB cap, 32 GiB Standard SSD and the
+same `600Mi` limit entry 11 raised here — but no sidecar, so it merges its own
+blocks up to 18h. Measured 2026-09-27, read-only on both:
+
+| | legacy (no sidecar) | this cluster |
+|---|---|---|
+| blocks overlapping the last 7d | 13 | 84 |
+| active series | 46.7k | 115k |
+| 7d cluster-wide memory panel | 1.0 s | timed out at 2m after reading 17.7 GB |
+| 7d CPU of one pod | 0.5 s | 25-43 s |
+
+Memory is not the difference: the legacy Prometheus has less of it.
+
+**Thanos alone did not fix it.** thanos-query asks every store whose time range
+overlaps the query, and the sidecar advertised all 9.6 days Prometheus held. The
+same 7d queries through thanos-query, one at a time:
+
+| query | time | read from the Prometheus disk |
+|---|---|---|
+| one pod, all stores (what the Thanos datasource did) | 49 s | 5.98 GB |
+| one pod, bucket only (`storeMatch[]`) | 0.2 s | 0 MB |
+| cluster-wide, bucket only | 1.2 s | 0 MB |
+| cluster-wide, bucket only, 5m resolution | 0.4 s | 0 MB |
+
+The bucket-only answers matched the full ones except for the most recent hours
+(1,902 of 1,924 points), which the bucket does not have yet. That recent part is
+what the sidecar still serves.
+
+**So three settings:**
+
+- `prometheusSpec.thanos.minTime: -2d`. The sidecar advertises two days; older
+  queries go to the store gateway. Two days read from Prometheus was measured fast
+  once entry 11 gave it page cache, and two days also leaves the bucket that much
+  margin if uploads stall.
+- **Thanos is Grafana's default datasource.** The bundled dashboards pick their
+  datasource through a variable that defaults to the default, so all of them move.
+  The chart's own `Prometheus` datasource stays for dashboards that pin its uid,
+  and selecting it for a long range brings the old behaviour back — bounded by
+  entry 11's one-minute guards.
+- `thanos-query --query.auto-downsampling`. The bucket keeps raw samples for 10
+  days and the 5m and 1h tiers for longer (entry 19); Thanos reads only raw data
+  unless a query allows a coarser resolution. This is the one setting whose effect
+  could not be measured: the bucket's oldest data was 9.6 days old.
+
+Prometheus's own retention is unchanged, so its alert rules and anyone querying it
+directly still see 15 days.
+
+**Rejected:**
+
+- *A shorter Prometheus retention.* It would narrow the sidecar the same way, but
+  also every rule and direct query, and reopen entry 19. `minTime` limits only what
+  the sidecar serves.
+- *Letting Prometheus merge its own blocks.* That is what the sidecar requires off;
+  turning it on means giving up the sidecar's uploads.
+- *A faster disk.* The VM caps all its disks together at 212 MB/s, against the
+  122 MB/s Prometheus's disk reached: at most about 1.7x, and every refresh would
+  still re-read everything.
+- *More memory.* Caching 15 days of blocks would take about 10 GB of a 16 GB node.
