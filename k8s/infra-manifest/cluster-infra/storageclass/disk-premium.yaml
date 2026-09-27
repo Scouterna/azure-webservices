@@ -1,16 +1,16 @@
-# Opt-in Premium SSD StorageClass.
-#
-# NOT the default. Premium disks cost noticeably more than the StandardSSD
-# default (disk-standardssd). Only reference this class explicitly, from a
-# workload that genuinely needs the higher, guaranteed IOPS/throughput
-# (e.g. a busy database). Everything else should use the default class.
+# Opt-in Premium SSD v2, for workloads that wait on writes (the shared Postgres).
+# About the price of disk-standardssd, but no host read cache — docs/decisions.md entry 24.
+# Immutable: changing parameters on a live cluster needs `kubectl delete sc` — docs/decisions.md entry 23.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: disk-premium
 provisioner: disk.csi.azure.com
 parameters:
-  skuName: Premium_LRS
+  skuName: PremiumV2_LRS
+  # The included baseline; anything above it is billed per IOPS / per MB/s.
+  DiskIOPSReadWrite: "3000"
+  DiskMBpsReadWrite: "125"
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
