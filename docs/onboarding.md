@@ -363,9 +363,7 @@ day-to-day changes, and no handing files over.
 Ask infra for a registration, giving them:
 
 1. **the repo URL** (and branch) — public needs nothing further; a **private**
-   repo also needs an ArgoCD repository credential, and the credential's URL
-   **scheme must match** the repo URL (an `https://` repo needs an HTTPS/token
-   credential, not an SSH deploy key);
+   repo also needs a deploy key, see [A private repo](#a-private-repo) below;
 2. **one path per environment** inside that repo, e.g. `k8s/dev` and `k8s/prod`;
 3. whether each environment should be **automated** (ArgoCD applies and
    self-heals — the cluster always matches Git) or **manual** (ArgoCD reports
@@ -373,6 +371,60 @@ Ask infra for a registration, giving them:
    automated; dev is often manual so you can keep hand-editing.
 
 Infra commits two small files and you are live. You never touch the infra repo.
+
+#### A private repo
+
+ArgoCD reads a private repo with a **read-only SSH deploy key** on that one repo
+([decisions.md entry 26](decisions.md#26-a-private-project-repo-is-read-with-a-per-repo-deploy-key)).
+Infra generates it, seals the private half into the `argocd` namespace, and
+hands you the public half; **a repo admin** adds it under *Settings → Deploy
+keys* with *Allow write access* **off**. Nobody keeps the private key.
+
+Use the SSH URL, `git@github.com:Scouterna/<repo>.git`, in both `gitops.yaml`
+and the AppProject's `sourceRepos`. The credential's scheme must match the
+`repoURL`; an `https://` URL with an SSH key fails as
+`authentication required: Repository not found`.
+
+The repo's **contents** stay private, but its **name** is written into this
+public repo.
+
+Infra, once per repo:
+
+```bash
+P=<project>                                    # e.g. proj-foo
+REPO=git@github.com:Scouterna/<repo>.git
+umask 077
+ssh-keygen -q -t ed25519 -N '' -C 'argocd@webservices-v2 read-only' -f ./deploy-key
+kubectl create secret generic repo-$P -n argocd \
+    --from-literal=type=git --from-literal=url=$REPO --from-literal=project=$P \
+    --from-file=sshPrivateKey=./deploy-key --dry-run=client -o yaml \
+  | kubectl label --local -f - argocd.argoproj.io/secret-type=repository -o yaml \
+  | kubeseal --controller-namespace sealed-secrets --format yaml \
+  > k8s/projects/$P/infra/sealedsecret-argocd-repo.yaml
+shred -u ./deploy-key
+rg -e 'secret-type' k8s/projects/$P/infra/sealedsecret-argocd-repo.yaml  # label survived sealing
+cat ./deploy-key.pub        # give this to the repo admin, then delete it
+```
+
+`project=` makes it a project-scoped repository: only that project's AppProject
+can use the key. The file name matches the `project-infra` include list, so it
+syncs with the project's other infra files.
+
+Verify the effect, not the sync status:
+
+```bash
+kubectl -n argocd get sealedsecret repo-$P                  # SYNCED True
+kubectl -n argocd get secret repo-$P -L argocd.argoproj.io/secret-type   # "repository"
+# once gitops.yaml is active — no "authentication required" / ComparisonError:
+kubectl -n argocd get app $P-<env> -o jsonpath='{.status.conditions}{"\n"}'
+```
+
+**Rotate or revoke** by deleting the deploy key on GitHub (instant) and rerunning
+the recipe.
+
+Commit `gitops.yaml` only once the paths it names exist in the repo. An
+Application pointing at a missing path sits in `ComparisonError`, and after 30
+minutes `ArgoCDAppNotSynced` fires.
 
 #### Moving from by-hand (C1) to GitOps
 
