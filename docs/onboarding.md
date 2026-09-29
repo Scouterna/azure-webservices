@@ -380,6 +380,10 @@ Infra generates it, seals the private half into the `argocd` namespace, and
 hands you the public half; **a repo admin** adds it under *Settings → Deploy
 keys* with *Allow write access* **off**. Nobody keeps the private key.
 
+The repo therefore needs **an admin on your side**. Org owners are admins of
+every repo, but they do not run this cluster; do not route key changes through
+them.
+
 Use the SSH URL, `git@github.com:Scouterna/<repo>.git`, in both `gitops.yaml`
 and the AppProject's `sourceRepos`. The credential's scheme must match the
 `repoURL`; an `https://` URL with an SSH key fails as

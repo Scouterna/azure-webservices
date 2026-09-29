@@ -1843,8 +1843,8 @@ read-only SSH deploy key on that one repo. Infra generates the key and seals the
 private half into a project-scoped ArgoCD repository Secret in `argocd`,
 committed as `k8s/projects/<project>/infra/sealedsecret-argocd-repo.yaml`. A repo
 admin adds the public half on GitHub. Nobody keeps the private key. The recipe is
-in [onboarding.md](onboarding.md#a-private-repo). **No project uses it yet**, so
-the recipe has not run against the live cluster.
+in [onboarding.md](onboarding.md#a-private-repo). Proven live 2026-09-29 with
+`proj-scoutid` staging.
 
 **Why.** It is the narrowest credential GitHub offers: one repo, read-only,
 belonging to no person and never expiring. Revoking it is one click on GitHub.
