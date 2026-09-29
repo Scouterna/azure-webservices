@@ -35,6 +35,7 @@ say why rather than deleting it.
 | [23](#23-the-files-shared-account-key-is-kept-out-of-tenant-namespaces) | The `files-shared` account key is kept out of tenant namespaces | current |
 | [24](#24-the-shared-postgres-runs-on-premium-ssd-v2-everything-else-stays-on-standard-ssd) | The shared Postgres runs on Premium SSD v2; everything else stays on Standard SSD | current |
 | [25](#25-dashboards-read-old-data-from-the-bucket-not-from-prometheus) | Dashboards read old data from the bucket, not from Prometheus | current |
+| [26](#26-a-private-project-repo-is-read-with-a-per-repo-deploy-key) | A private project repo is read with a per-repo deploy key | current |
 
 ---
 
@@ -1834,3 +1835,35 @@ directly still see 15 days.
   122 MB/s Prometheus's disk reached: at most about 1.7x, and every refresh would
   still re-read everything.
 - *More memory.* Caching 15 days of blocks would take about 10 GB of a 16 GB node.
+
+## 26. A private project repo is read with a per-repo deploy key
+
+**Current.** When a project's GitOps repo is private, ArgoCD reads it with a
+read-only SSH deploy key on that one repo. Infra generates the key and seals the
+private half into a project-scoped ArgoCD repository Secret in `argocd`,
+committed as `k8s/projects/<project>/infra/sealedsecret-argocd-repo.yaml`. A repo
+admin adds the public half on GitHub. Nobody keeps the private key. The recipe is
+in [onboarding.md](onboarding.md#a-private-repo). Proven live 2026-09-29 with
+`proj-scoutid` staging.
+
+**Why.** It is the narrowest credential GitHub offers: one repo, read-only,
+belonging to no person and never expiring. Revoking it is one click on GitHub.
+The `project` field limits it to that project's AppProject, so another project
+cannot point an Application at the repo and borrow it. It needs no new mechanism,
+because `project-infra` already applies `sealedsecret-*.yaml`. That does mean
+`project-infra` now writes into `argocd`, but it can already create RoleBindings
+in any namespace, so its reach does not grow.
+
+**Rejected:**
+
+- *An HTTPS personal access token.* It belongs to a person, stops working when
+  they leave, and a classic token reads every repo they can.
+- *A GitHub App as an org-wide `repo-creds` template.* One credential covers every
+  repo it is installed on, and setting it up needs an org owner. **Revisit** once
+  several projects have private repos, where one App would replace a key per repo.
+- *An `ExternalSecret` from Key Vault.* It would add `argocd` to the `azure-kv`
+  store, and store membership grants the whole vault (entry 7).
+- *A Secret created by hand.* It is not in Git, so a rebuild loses it.
+
+**Cost, accepted.** The repo's contents stay private, but its URL is written into
+this public repo in `gitops.yaml` and the AppProject.
