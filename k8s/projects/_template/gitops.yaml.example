@@ -30,7 +30,7 @@ revision: main
 # One entry per environment. `name` must match the namespace suffix, so `dev`
 # targets namespace PROJECT-dev — which infra/namespace-dev.yaml must create.
 #
-# `path` is the directory INSIDE the project's repo holding that environment's
+# `sourcePath` is the directory INSIDE the project's repo holding that environment's
 # manifests (plain YAML or a Helm chart; ArgoCD detects which).
 #
 # `automated` true  → ArgoCD applies and self-heals; the cluster always matches Git.
@@ -39,8 +39,8 @@ revision: main
 #                     DISCARDS those edits (see docs/argocd.md).
 environments:
   - name: dev
-    path: k8s/dev
+    sourcePath: k8s/dev
     automated: false
   - name: prod
-    path: k8s/prod
+    sourcePath: k8s/prod
     automated: true

@@ -11,7 +11,8 @@
 # never swept up here: it runs by hand, or from the project's OWN GitOps repo via
 # gitops-appset.yaml in this directory.
 #
-# Apply once at bootstrap (kubectl apply -f); self-manages thereafter.
+# Applied by hand (kubectl apply -f k8s/argocd/projects-root/), at bootstrap
+# and after every change to this file: no Application manages it.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:

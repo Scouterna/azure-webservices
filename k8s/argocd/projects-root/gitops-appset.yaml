@@ -10,8 +10,8 @@
 # The generated Application's SOURCE is the project's own repo. After this, the
 # project commits there and never touches the infra repo again.
 #
-# Apply once at bootstrap (kubectl apply -f k8s/argocd/projects-root/);
-# self-manages thereafter.
+# Applied by hand (kubectl apply -f k8s/argocd/projects-root/), at bootstrap
+# and after every change to this file: no Application manages it.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -51,7 +51,9 @@ spec:
         # The PROJECT's repo, not this one.
         repoURL: '{{.repoURL}}'
         targetRevision: '{{.revision}}'
-        path: '{{.path}}'
+        # Not `path`: the git generator's own .path (gitops.yaml's location)
+        # wins over the list element's key of the same name.
+        path: '{{.sourcePath}}'
       syncPolicy:
         # `automated` is added by templatePatch below, only for environments
         # that ask for it — see the comment there.
