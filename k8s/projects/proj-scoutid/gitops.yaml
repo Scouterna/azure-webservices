@@ -21,7 +21,7 @@ project: proj-scoutid
 # repository credential whose URL SCHEME matches this one (see docs/onboarding.md).
 # Private: SSH form, matching infra/sealedsecret-argocd-repo.yaml and the
 # sourceRepos in k8s/argocd/projects/proj-scoutid.yaml.
-repoURL: git@github.com:Scouterna/scoutid-keycloak-infra.git
+repoURL: git@github.com:Scouterna/scoutid-keycloak-infra-temp.git
 
 # Branch or tag ArgoCD tracks.
 revision: main

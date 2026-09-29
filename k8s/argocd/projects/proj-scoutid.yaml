@@ -25,7 +25,7 @@ spec:
   # Private repo: SSH form, to match the deploy key in
   # k8s/projects/proj-scoutid/infra/sealedsecret-argocd-repo.yaml.
   sourceRepos:
-    - 'git@github.com:Scouterna/scoutid-keycloak-infra.git'
+    - 'git@github.com:Scouterna/scoutid-keycloak-infra-temp.git'
 
   # ONLY this project's namespaces. This is what makes the model per-project;
   # a `namespace: '*'` here would let the project deploy into any namespace in
