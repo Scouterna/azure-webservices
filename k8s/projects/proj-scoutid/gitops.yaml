@@ -2,9 +2,6 @@
 # the infra repo and only infra commits it. It is the one-time registration —
 # after this the project commits to its own repo and never touches this one.
 #
-# Rename to gitops.yaml to activate. Without it a project simply has no ArgoCD
-# registration and installs by hand, which is a perfectly normal end state.
-#
 # What this generates (see k8s/argocd/projects-root/gitops-appset.yaml):
 #   - ONE AppProject named <project>, scoped to THIS repo and THIS project's
 #     namespaces only, and
@@ -22,7 +19,9 @@ project: proj-scoutid
 # entry in the generated AppProject's sourceRepos.
 # PUBLIC repos need no credential. A PRIVATE repo additionally needs an ArgoCD
 # repository credential whose URL SCHEME matches this one (see docs/onboarding.md).
-repoURL: https://github.com/Scouterna/proj-scoutid-gitops.git
+# Private: SSH form, matching infra/sealedsecret-argocd-repo.yaml and the
+# sourceRepos in k8s/argocd/projects/proj-scoutid.yaml.
+repoURL: git@github.com:Scouterna/scoutid-keycloak-infra.git
 
 # Branch or tag ArgoCD tracks.
 revision: main
@@ -37,10 +36,9 @@ revision: main
 #             false → ArgoCD reports drift but changes nothing until a deliberate
 #                     sync. Lets the project keep hand-editing; note a later sync
 #                     DISCARDS those edits (see docs/argocd.md).
+# Only staging exists in the repo so far. Add prod once k8s/prod exists: an
+# environment whose path is missing sits in ComparisonError.
 environments:
-  - name: dev
-    path: k8s/dev
-    automated: false
-  - name: prod
-    path: k8s/prod
+  - name: staging
+    path: k8s/staging
     automated: true
