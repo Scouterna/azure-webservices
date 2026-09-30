@@ -9,7 +9,7 @@ Onboarding has two layers, split by who is allowed to do what:
 
 - **Layer 1 — infra-owned resources** a project *cannot* create for itself:
   its namespace(s), developer access (RBAC), and any shared services like a
-  database. These live in `k8s/projects/<project>/infra/` and are applied
+  database or a [Dex client](#github-login-for-the-projects-own-identity-provider). These live in `k8s/projects/<project>/infra/` and are applied
   **automatically by ArgoCD** — the infra team just commits the files.
 - **Layer 2 — the project's own workload** (its Deployment, Ingress, …). The
   project runs this itself (with `kubectl`/`helm` as their GitHub identity, see
@@ -725,7 +725,8 @@ rather than leaving you to keep them in step.
 **The password is sealed into Git, not stored in Key Vault.** Onboarding a project
 needs a GitHub account and cluster access, which the infra team already has through
 Dex, and no Azure or Entra account. Key Vault stays the store for install-time
-infra secrets. See [decisions.md](decisions.md).
+infra secrets. See
+[decisions.md entry 28](decisions.md#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed).
 
 1. **Generate both files.** `$PROJECT` comes from §A1. List this project's
    environments exactly as §A2 created them — the script loops over what you pass,
@@ -801,6 +802,120 @@ infra secrets. See [decisions.md](decisions.md).
 > Deleting a project's file does **not** drop its data — `prune` is disabled on
 > the `postgres-databases` app and `databaseReclaimPolicy: retain` is set.
 > Retiring a database is deliberate; see [postgres.md](postgres.md).
+
+## GitHub login for the project's own identity provider
+
+A project that runs its own identity provider, such as Keycloak, can offer GitHub
+login by using the cluster's Dex as an upstream OIDC provider. Infra registers a
+**Dex static client** for it. ScoutID staging does this for its Keycloak admin
+console.
+
+> **Dex admits the whole Scouterna GitHub org, for every client.** Its GitHub
+> connector filters on the org only, and a connector's filter applies to every
+> client, so narrowing it for one project would lock out everyone else. Dex puts
+> the user's teams in the `groups` claim as `Scouterna:<team>`, and **the
+> project's identity provider must refuse anyone outside its team**. ScoutID does
+> it with a Keycloak mapper that grants a role when `groups` contains
+> `Scouterna:ScoutID`, and a post-broker-login flow that denies anyone without
+> that role. Check the exact group string against a real login first
+> ([verifying identity strings](#verifying-identity-strings)); a wrong string
+> refuses everyone, or nobody.
+
+**Two files, one secret.** Dex and the project's identity provider share a client
+secret, so it is generated once and sealed twice, and both halves are committed
+here: Dex's half in `k8s/infra-manifest/dex/`, the project's half in
+`k8s/projects/<project>/infra/`. No Azure account is needed
+([decisions.md entry 28](decisions.md#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed)).
+
+> ScoutID staging predates this layout: its half is still sealed in its own
+> GitOps repo. It moves here when that repo is renamed.
+
+**From the project:** the redirect URI(s) of its identity provider, and the name
+and key of the Secret it reads in its namespace. ScoutID uses Secret `dex-client`,
+key `DEX_CLIENT_SECRET`.
+
+1. **Register the client** in `k8s/infra-manifest/dex/values.yaml`: a
+   `staticClients` entry, and an `envVars` entry that feeds its secret to Dex.
+   Name the client `<project>-<purpose>-<env>`:
+
+   ```yaml
+   staticClients:
+     - id: scoutid-keycloak-staging
+       name: ScoutID Keycloak (staging)
+       redirectURIs:
+         - https://admin.staging.id.scouterna.se/realms/master/broker/dex/endpoint
+       secretEnv: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
+   envVars:
+     - name: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
+       valueFrom:
+         secretKeyRef:
+           name: dex-scoutid-keycloak-staging   # sealedsecret-scoutid-keycloak-staging.yaml
+           key: client-secret
+   ```
+
+   Redirect URIs must match exactly what the identity provider sends.
+
+2. **Generate the secret and seal both halves.** The value lives only in a shell
+   variable:
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)"
+   PROJECT=proj-scoutid ENV=staging
+   CLIENT=scoutid-keycloak-staging       # the id from step 1
+   NS="$PROJECT-$ENV"                    # "$PROJECT" for a single-namespace project
+   CERT=$(mktemp)
+   kubeseal --controller-namespace sealed-secrets \
+     --controller-name sealed-secrets-controller --fetch-cert > "$CERT"
+   SECRET=$(openssl rand -hex 32)
+   seal() {  # <secret name> <namespace> <key> <output file>
+     kubectl create secret generic "$1" -n "$2" --from-literal="$3=$SECRET" \
+       --dry-run=client -o yaml | kubeseal --cert "$CERT" --format yaml > "$4"
+   }
+   seal "dex-$CLIENT" dex client-secret \
+     "k8s/infra-manifest/dex/sealedsecret-$CLIENT.yaml"
+   seal dex-client "$NS" DEX_CLIENT_SECRET \
+     "k8s/projects/$PROJECT/infra/sealedsecret-dex-client-$ENV.yaml"
+   unset SECRET; rm "$CERT"
+   ```
+
+   Both file names are load-bearing. The Dex Application reads every manifest in
+   `k8s/infra-manifest/dex/` except `values.yaml`, and `project-infra` reads only
+   `sealedsecret-*.yaml` from the project's `infra/`.
+
+3. **Commit all three files together** through a PR. `k8s/` is CODEOWNERS-protected.
+   The `envVars` change rolls the Dex pod when it syncs. That is harmless, because
+   Dex keeps its signing keys in Kubernetes
+   ([decisions.md entry 16](decisions.md#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb)).
+
+4. **Tell the project** the issuer `https://dex.infra.ws.scouterna.net`, the
+   client id, and that it must request the `groups` scope, because Dex leaves the
+   claim out otherwise. A Keycloak identity provider also needs
+   `clientAuthMethod: client_secret_post`. ScoutID's config is in its repo's
+   `k8s/staging/values.yaml`, `20-master-dex.yaml`.
+
+5. **Verify the effect, not the sync.** Both halves exist and hold the same
+   value (compare hashes, never print the value):
+
+   ```bash
+   kubectl -n dex get sealedsecret "dex-$CLIENT"        # SYNCED True
+   kubectl -n "$NS" get sealedsecret dex-client         # SYNCED True
+   kubectl -n dex get secret "dex-$CLIENT" \
+     -o jsonpath='{.data.client-secret}' | base64 -d | sha256sum
+   kubectl -n "$NS" get secret dex-client \
+     -o jsonpath='{.data.DEX_CLIENT_SECRET}' | base64 -d | sha256sum
+   kubectl -n dex logs deploy/dex | grep 'config static client'   # lists the client
+   ```
+
+   Then log in as a team member, **and as an org member outside the team**. The
+   second login must be refused. That refusal is the only proof of the team check.
+
+**Rotating** means re-running step 2 for the same client and committing both
+files. A changed Secret does not restart anything. Delete the Dex pod
+(`kubectl -n dex delete pod -l app.kubernetes.io/name=dex`, not `rollout restart`,
+which ArgoCD reverts), and have the project reload its side.
+
+**Removing** the client is the reverse: the `staticClients` and `envVars`
+entries, and both sealed files, in one commit.
 
 ## Persistent state for your app
 

@@ -37,6 +37,7 @@ say why rather than deleting it.
 | [25](#25-dashboards-read-old-data-from-the-bucket-not-from-prometheus) | Dashboards read old data from the bucket, not from Prometheus | current |
 | [26](#26-a-private-project-repo-is-read-with-a-per-repo-deploy-key) | A private project repo is read with a per-repo deploy key | current |
 | [27](#27-dev-environments-may-follow-a-moving-image-tag-through-argocd-image-updater) | Dev environments may follow a moving image tag through ArgoCD Image Updater | current |
+| [28](#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed) | Onboarding needs no Azure account: shared project credentials are sealed | current |
 
 ---
 
@@ -1912,3 +1913,34 @@ cannot create an `ImageUpdater`, and each names one Application exactly.
 - *`:latest` plus `imagePullPolicy: Always` and a restart.* ArgoCD cannot see a
   moving tag move, so nothing restarts without `kubectl`.
 
+
+## 28. Onboarding needs no Azure account: shared project credentials are sealed
+
+**Current.** A credential that infra and a project must both hold is generated
+once and sealed twice, and both halves are committed to this repo: infra's half
+beside the service that uses it, the project's half in
+`k8s/projects/<project>/infra/`. Two credentials work this way: a database
+password (`scripts/new-project-db.sh`) and the client secret of a project's own
+Dex client. Key Vault holds only secrets created at install time for the platform
+itself. The recipes are in [onboarding.md](onboarding.md).
+
+**Why.** Onboarding a project should need a GitHub account and cluster access,
+which the infra team already has through Dex, and nothing in Azure. The vault uses
+RBAC authorization, so Owner and Contributor on the subscription do not grant
+secret access. Writing a Key Vault secret needs Key Vault Secrets Officer, which
+two people hold. Putting both halves in one repo means one PR onboards the project,
+and a rotation is one commit, so the two halves cannot drift apart.
+
+**Rejected:**
+
+- *Key Vault + ESO for infra's half.* This was the first ScoutID staging Dex
+  client, replaced the same day. It gated onboarding on a Secrets Officer, while
+  the project's half was sealed anyway.
+- *The project's half in the project's own GitOps repo.* Every rotation then
+  needs a commit in two repos, owned by different people, in step.
+
+**Cost, accepted.** The project's namespace admins can read their half. That is
+their own client's secret, and it only lets them act as that client. Dex admits
+the whole Scouterna GitHub org for every client, because its connector filter is
+shared by all of them, so a project's identity provider must check team
+membership itself.
