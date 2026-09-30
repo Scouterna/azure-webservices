@@ -264,9 +264,10 @@ Headlamp/kubectl — it is not driven by your RoleBindings.
 | Any other Scouterna member | Viewer | Read dashboards |
 
 Membership of the **Scouterna org** is all that is required to log in. There is
-no Editor tier: infra dashboards live in Git under
-`k8s/infra-manifest/monitoring/dashboards/` and are loaded by the Grafana
-sidecar, so dashboards are added by pull request, not authored in the UI.
+no Editor tier: dashboards live in Git and are loaded by the Grafana sidecar, so
+they are added by pull request, not authored in the UI. Infra's are under
+`k8s/infra-manifest/monitoring/dashboards/`; a project keeps its own in its own
+repo (see [Project dashboards](#project-dashboards) below).
 
 Two consequences worth knowing:
 
@@ -280,6 +281,44 @@ Two consequences worth knowing:
   isolation is a separate, unimplemented design; until it exists, treat
   everything in Grafana as visible to all of Scouterna, and keep genuinely
   sensitive values out of logs.
+
+#### Project dashboards
+
+A project ships a dashboard as a ConfigMap in its **own GitOps repo**, in the
+namespace it describes. It appears in a Grafana folder named after that
+namespace. Nothing in this repo changes, and no Grafana role is needed.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myapp-dashboard
+  namespace: proj-<name>-prod
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: proj-<name>-prod     # must equal the namespace
+data:
+  myapp.json: |
+    { ...dashboard JSON... }
+```
+
+- **`grafana_folder` must equal the namespace.** An admission policy rejects
+  anything else, including a missing annotation, and ArgoCD shows the rejection
+  as a sync error (decisions.md entry 29).
+- **Start from a UI export, then clean it.** Draft the dashboard as an Admin, or
+  ask one, then *Export → Export as JSON*. Set `"id": null`, and delete the UI
+  copy before the ConfigMap lands. From then on the dashboard is read-only in
+  the UI; edit the JSON in Git.
+- **Prefix the `uid` with the project**, e.g. `wsj27-project-api`. Uids are
+  global across Grafana, so a reused one can shadow another dashboard.
+- **Use the `thanos` datasource uid** so ranges beyond two days read from the
+  bucket (decisions.md entry 25). Queries are the same PromQL.
+- **Template variables that match nothing blank every panel**, which looks
+  exactly like "no data". Check each variable's own query returns something.
+
+Folders sort dashboards; they do not restrict them. Every Scouterna member can
+open every folder.
 
 ### Verifying identity strings
 

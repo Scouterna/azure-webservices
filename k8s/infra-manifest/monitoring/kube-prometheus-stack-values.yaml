@@ -130,6 +130,14 @@ grafana:
   sidecar:
     datasources:
       isDefaultDatasource: false
+    # One Grafana folder per grafana_folder annotation, pinned to the namespace by the
+    # project-dashboard-folder admission policy; unannotated (infra) stay in General.
+    # ConfigMaps only: a sealed Secret would bypass the policy. decisions.md entry 29.
+    dashboards:
+      resource: configmap
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
 
 # API-server SLO burn-rate rules. Disabled for the same reason as the three
 # components below: AKS runs the API server, so these are for operators of a

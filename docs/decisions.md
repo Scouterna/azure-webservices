@@ -38,6 +38,7 @@ say why rather than deleting it.
 | [26](#26-a-private-project-repo-is-read-with-a-per-repo-deploy-key) | A private project repo is read with a per-repo deploy key | current |
 | [27](#27-dev-environments-may-follow-a-moving-image-tag-through-argocd-image-updater) | Dev environments may follow a moving image tag through ArgoCD Image Updater | current |
 | [28](#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed) | Onboarding needs no Azure account: shared project credentials are sealed | current |
+| [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
 
 ---
 
@@ -1944,3 +1945,55 @@ their own client's secret, and it only lets them act as that client. Dex admits
 the whole Scouterna GitHub org for every client, because its connector filter is
 shared by all of them, so a project's identity provider must check team
 membership itself.
+
+## 29. A project ships its dashboards from its own repo, into a folder named for its namespace
+
+**Current.** A project adds a Grafana dashboard as a ConfigMap in its own GitOps
+repo, labelled `grafana_dashboard: "1"` and annotated
+`grafana_folder: <its namespace>`. The Grafana sidecar already watches every
+namespace; it writes each dashboard into a subdirectory named by the annotation,
+and Grafana turns each subdirectory into a folder
+(`foldersFromFilesStructure`). Infra's dashboards carry no annotation and stay in
+General. A `ValidatingAdmissionPolicy` (`project-dashboard-folder`,
+`k8s/infra-manifest/cluster-infra/admissionpolicy/`) rejects a labelled ConfigMap
+in a project namespace unless the annotation equals that namespace. Its binding
+uses the same `scouterna.se/project` selector as entry 22. The recipe is in
+[onboarding.md](onboarding.md).
+
+**Why.** Everyone outside `webservices-infra` is a Grafana Viewer, so a project
+cannot save a dashboard in the UI. Without the annotation, every dashboard shares
+one flat directory keyed by filename, so two projects using `dashboard.json`
+overwrite each other without an error. The annotation must be enforced, not just
+agreed, because the sidecar treats it as a path: it uses an absolute value as it
+is and joins a relative one, so `../` escapes the base directory. A namespace
+name can contain neither.
+
+The sidecar watches ConfigMaps only (`resource: configmap`, previously `both`).
+A project may commit SealedSecrets (entry 21), and the controller copies the
+template's labels onto the Secret, so a labelled Secret would load a dashboard
+that the policy never saw.
+
+**Rejected:**
+
+- *A convention without enforcement.* A project could write into another
+  project's folder, or anywhere the sidecar can write.
+- *A `MutatingAdmissionPolicy` that stamps the annotation.* Projects would have
+  nothing to write, but the live object would differ from Git without anyone
+  seeing why, and a project that set its own value would stay OutOfSync forever.
+- *One folder per project instead of per namespace.* It needs the project name
+  derived from the namespace. `proj-wsj27-prod` and `proj-wsj27-staging` as two
+  folders costs nothing.
+- *An Editor role for project teams.* Dashboards written in the UI live only in
+  Grafana's database, outside review and outside a rebuild.
+
+**Not solved.**
+
+- **A folder is not access control.** Every Viewer sees every folder, and any
+  namespace's metrics through Explore (onboarding.md, Grafana). Per-team folder
+  permissions need GitHub team sync, a Grafana Enterprise feature.
+- **Dashboard `uid`s are global.** A project reusing an infra dashboard's uid
+  can shadow it. The policy language has no JSON parser, so a naming rule in
+  onboarding.md is the only guard.
+- **The Grafana ServiceAccount can still read Secrets in every namespace.** The
+  chart hardcodes `secrets` in its ClusterRole whatever `resource` says; dropping
+  it needs a committed ClusterRole via `rbac.useExistingClusterRole`.
