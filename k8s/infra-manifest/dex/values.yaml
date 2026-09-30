@@ -81,6 +81,13 @@ config:
         - http://localhost:8000
         - http://127.0.0.1:8000
         - http://localhost:18000
+    # ScoutID staging Keycloak: identity provider in its master realm.
+    - id: scoutid-keycloak-staging
+      name: ScoutID Keycloak (staging)
+      redirectURIs:
+        - https://staging.id.scouterna.se/realms/master/broker/dex/endpoint
+        - https://admin.staging.id.scouterna.se/realms/master/broker/dex/endpoint
+      secretEnv: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
 
 # Inject the GitHub client secret and the Headlamp client secret from the
 # ESO-managed Kubernetes secret `dex-oauth` into Dex's environment, so the
@@ -96,6 +103,11 @@ envVars:
       secretKeyRef:
         name: dex-oauth
         key: headlamp-client-secret
+  - name: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-oauth
+        key: scoutid-keycloak-staging-client-secret
 
 ingress:
   enabled: true
