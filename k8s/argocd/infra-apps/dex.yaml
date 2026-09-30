@@ -2,6 +2,8 @@
 # Headlamp (and later kubectl via AKS structured auth). Needs Traefik + a cert
 # issuer (wave 1) and the ESO-managed `dex-oauth` secret (external-secrets-config,
 # wave 1). Comes up before Headlamp (wave 3) so Headlamp's OIDC issuer exists.
+# Client secrets shared with a project's Keycloak are SealedSecrets in
+# k8s/infra-manifest/dex/ instead, sealed with the same value in the project's repo.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -27,6 +29,13 @@ spec:
     - repoURL: https://github.com/Scouterna/azure-webservices.git
       targetRevision: main
       ref: values
+    # Plain manifests next to the values (SealedSecrets); values.yaml is the
+    # chart's Helm values, not a manifest.
+    - repoURL: https://github.com/Scouterna/azure-webservices.git
+      targetRevision: main
+      path: k8s/infra-manifest/dex
+      directory:
+        exclude: 'values.yaml'
   syncPolicy:
     automated:
       prune: true

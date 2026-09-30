@@ -90,8 +90,9 @@ config:
       secretEnv: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
 
 # Inject the GitHub client secret and the Headlamp client secret from the
-# ESO-managed Kubernetes secret `dex-oauth` into Dex's environment, so the
-# config templating above can reference them.
+# ESO-managed Kubernetes secret `dex-oauth`, and the ScoutID staging client
+# secret from the SealedSecret in this directory, into Dex's environment, so
+# the config templating above can reference them.
 envVars:
   - name: GITHUB_CLIENT_SECRET
     valueFrom:
@@ -106,8 +107,8 @@ envVars:
   - name: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
     valueFrom:
       secretKeyRef:
-        name: dex-oauth
-        key: scoutid-keycloak-staging-client-secret
+        name: dex-scoutid-keycloak-staging   # sealedsecret-scoutid-keycloak-staging.yaml
+        key: client-secret
 
 ingress:
   enabled: true
