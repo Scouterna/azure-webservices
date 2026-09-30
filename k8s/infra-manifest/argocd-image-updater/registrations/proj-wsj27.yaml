@@ -15,6 +15,9 @@ spec:
         method: argocd
       commonUpdateSettings:
         updateStrategy: digest
+        # ArgoCD 3.4 here leaves status.summary.images empty, and without this the
+        # updater skips every image it cannot find there. Safe: one exact app.
+        forceUpdate: true
       images:
         - alias: campfire
           imageName: ghcr.io/scouterna/wsj27-campfire:dev
