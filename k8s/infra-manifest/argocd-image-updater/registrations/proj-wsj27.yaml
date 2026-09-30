@@ -1,0 +1,34 @@
+# proj-wsj27 dev follows the :dev tag of each app. The Application must be
+# Kustomize (the digest is written to spec.source.kustomize.images) and must
+# auto-sync, or the new digest is recorded but never rolled out.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: proj-wsj27
+  namespace: argocd
+spec:
+  namespace: argocd
+  applicationRefs:
+    # Exact name, never a glob: a pattern reaching prod or another project would
+    # roll it too.
+    - namePattern: proj-wsj27-dev
+      writeBackConfig:
+        method: argocd
+      commonUpdateSettings:
+        updateStrategy: digest
+      images:
+        - alias: campfire
+          imageName: ghcr.io/scouterna/wsj27-campfire:dev
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/scouterna/wsj27-campfire
+        - alias: auth-api
+          imageName: ghcr.io/scouterna/wsj27-auth-api:dev
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/scouterna/wsj27-auth-api
+        - alias: project-api
+          imageName: ghcr.io/scouterna/wsj27-project-api:dev
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/scouterna/wsj27-project-api

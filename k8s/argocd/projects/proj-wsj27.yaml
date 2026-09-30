@@ -1,0 +1,104 @@
+# AppProject for proj-wsj27's own GitOps repo. Copied from
+# _project-gitops.yaml.example.
+#
+# THIS FILE IS THE SECURITY BOUNDARY. The project controls its repo's contents,
+# so nothing reviews what it deploys — this whitelist is the only thing standing
+# between a commit in their repo and the cluster. Read the exclusions before
+# widening anything.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: proj-wsj27
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: proj-wsj27 — self-service GitOps from the project's own repo
+
+  # EXACTLY this project's repo. Never a github.com/** glob: that would let any
+  # Application in this project pull from any repo on GitHub.
+  #
+  # If a glob is ever genuinely needed (e.g. a project splitting across several
+  # repos), note that a single '*' does NOT match across '/' — 'https://github.com/*'
+  # matches nothing useful; 'https://github.com/Scouterna/**' is the org-wide form.
+  #
+  # Private repo: SSH form, to match the deploy key in
+  # k8s/projects/proj-wsj27/infra/sealedsecret-argocd-repo.yaml.
+  sourceRepos:
+    - 'git@github.com:Scouterna/wsj27-infra.git'
+
+  # ONLY this project's namespaces. This is what makes the model per-project;
+  # a `namespace: '*'` here would let the project deploy into any namespace in
+  # the cluster, including argocd and kube-system.
+  destinations:
+    - namespace: proj-wsj27-dev
+      server: https://kubernetes.default.svc
+    - namespace: proj-wsj27-staging
+      server: https://kubernetes.default.svc
+    - namespace: proj-wsj27-prod
+      server: https://kubernetes.default.svc
+
+  # No cluster-scoped resources at all. Namespaces are Layer 1 and come from
+  # k8s/projects/proj-wsj27/infra/, applied by the project-infra ApplicationSet.
+  clusterResourceWhitelist: []
+
+  # Workload kinds only. An absent whitelist means EVERYTHING is allowed, so
+  # this list must stay present even if it looks long.
+  namespaceResourceWhitelist:
+    - group: 'apps'
+      kind: Deployment
+    - group: 'apps'
+      kind: StatefulSet
+    - group: 'apps'
+      kind: DaemonSet
+    - group: 'batch'
+      kind: Job
+    - group: 'batch'
+      kind: CronJob
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: PersistentVolumeClaim
+    - group: 'networking.k8s.io'
+      kind: Ingress
+    - group: 'networking.k8s.io'
+      kind: NetworkPolicy
+    - group: 'autoscaling'
+      kind: HorizontalPodAutoscaler
+    - group: 'policy'
+      kind: PodDisruptionBudget
+    # Scrape config only — a ServiceMonitor cannot grant access to anything.
+    - group: 'monitoring.coreos.com'
+      kind: ServiceMonitor
+    # Traefik routing within the project's own namespaces.
+    - group: 'traefik.io'
+      kind: IngressRoute
+    - group: 'traefik.io'
+      kind: Middleware
+    # Committed SealedSecrets. Safe to permit: the ciphertext is bound to this
+    # cluster's key AND to its own namespace/name, so it cannot be retargeted.
+    # Same reasoning as project-infra. docs/decisions.md entry 21.
+    - group: 'bitnami.com'
+      kind: SealedSecret
+
+  # DELIBERATELY EXCLUDED — each of these is a real escalation, not an oversight:
+  #
+  #   RoleBinding, Role   bind ClusterRole/admin (or cluster-admin) to themselves
+  #   ServiceAccount      mints an identity, and a token with it
+  #   Secret              credentials stay infra-granted; also keeps plaintext
+  #                       out of the project's own Git history
+  #   ExternalSecret      would read any Key Vault secret ESO's identity can reach
+  #   argoproj.io/*       an Application with `project: infra` is a ONE-FILE
+  #                       escape to cluster-admin — Application and AppProject
+  #                       are themselves namespaced CRs in argocd
+  #   postgresql.cnpg.io  databases are Layer 1, on the shared server
+  #
+  # SealedSecret is NOT on this list — see the whitelist above and entry 21.
+  # Plain Secret still is: not because it reaches anyone else, but because
+  # committing plaintext is a decision infra would rather a project made
+  # deliberately, by hand, than by a sync that looks like every other sync.
+  #
+  # Anything the project needs from this list is an infra request, delivered
+  # through k8s/projects/proj-wsj27/infra/ — which only infra can commit.

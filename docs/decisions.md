@@ -36,6 +36,7 @@ say why rather than deleting it.
 | [24](#24-the-shared-postgres-runs-on-premium-ssd-v2-everything-else-stays-on-standard-ssd) | The shared Postgres runs on Premium SSD v2; everything else stays on Standard SSD | current |
 | [25](#25-dashboards-read-old-data-from-the-bucket-not-from-prometheus) | Dashboards read old data from the bucket, not from Prometheus | current |
 | [26](#26-a-private-project-repo-is-read-with-a-per-repo-deploy-key) | A private project repo is read with a per-repo deploy key | current |
+| [27](#27-dev-environments-may-follow-a-moving-image-tag-through-argocd-image-updater) | Dev environments may follow a moving image tag through ArgoCD Image Updater | current |
 
 ---
 
@@ -1867,3 +1868,47 @@ in any namespace, so its reach does not grow.
 
 **Cost, accepted.** The repo's contents stay private, but its URL is written into
 this public repo in `gitops.yaml` and the AppProject.
+
+## 27. Dev environments may follow a moving image tag through ArgoCD Image Updater
+
+**Current.** ArgoCD Image Updater runs in `argocd` (`infra-apps/argocd-image-updater.yaml`).
+Infra registers a project's **dev** Application in
+`infra-manifest/argocd-image-updater/registrations/<project>.yaml`, naming the
+Application exactly and the moving tag per image (`:dev`) with the `digest`
+strategy. When the tag moves, the updater writes the new digest to the
+Application's `spec.source.kustomize.images`; the Application auto-syncs and the
+pod rolls. The `project-gitops` ApplicationSet ignores that one field
+(`ignoreApplicationDifferences`) so it does not undo the write. First used for
+`proj-wsj27-dev`.
+
+**Why.** A project developer asked to push to the app repo and see it running in
+dev, touching neither the project's GitOps repo nor any Kubernetes tool. J26 already
+worked this way on its own cluster.
+
+**Dev only.** The deployed digest lives on the live Application, not in Git, so Git
+no longer says exactly what runs. That is acceptable where the point is "the
+latest build"; in prod, a pinned tag in Git stays the record.
+
+**The requirements it puts on an environment.** The path must be a Kustomize
+directory — the updater writes to `kustomize.images` and cannot edit plain YAML —
+and the environment must be `automated`, or the new digest is recorded and never
+rolled out. For a dev that should still keep hand edits, `gitops.yaml` gained an
+optional `selfHeal: false`.
+
+**Cost, accepted.** The chart's RBAC lets the controller **patch every Application
+in the cluster** and **read every Secret in `argocd`**, including repository
+credentials. An Application patch can change its project or source, so the
+updater sits inside ArgoCD's own trust boundary. It is an upstream Argo project
+component run with its defaults, and the registrations are infra-owned: a project
+cannot create an `ImageUpdater`, and each names one Application exactly.
+
+**Rejected:**
+
+- *The app's CI commits the new tag to the project's GitOps repo.* Pure GitOps,
+  but the app repo's CI then needs write access to the GitOps repo, which includes
+  the prod paths — and the developer asked not to touch that repo at all.
+- *Git write-back by the updater.* It needs a write-capable deploy key in the
+  cluster, undoing entry 26's read-only key.
+- *`:latest` plus `imagePullPolicy: Always` and a restart.* ArgoCD cannot see a
+  moving tag move, so nothing restarts without `kubectl`.
+

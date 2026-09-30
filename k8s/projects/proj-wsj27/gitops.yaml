@@ -22,7 +22,9 @@ project: proj-wsj27
 # entry in the generated AppProject's sourceRepos.
 # PUBLIC repos need no credential. A PRIVATE repo additionally needs an ArgoCD
 # repository credential whose URL SCHEME matches this one (see docs/onboarding.md).
-repoURL: https://github.com/Scouterna/proj-wsj27-gitops.git
+# Private: SSH form, matching infra/sealedsecret-argocd-repo.yaml and the
+# sourceRepos in k8s/argocd/projects/proj-wsj27.yaml.
+repoURL: git@github.com:Scouterna/wsj27-infra.git
 
 # Branch or tag ArgoCD tracks.
 revision: main
@@ -37,10 +39,18 @@ revision: main
 #             false → ArgoCD reports drift but changes nothing until a deliberate
 #                     sync. Lets the project keep hand-editing; note a later sync
 #                     DISCARDS those edits (see docs/argocd.md).
+# `selfHeal` optional, default true. false with automated: true syncs on each
+#             commit or new image but leaves hand edits alone in between.
+#
+# Staging is left out until k8s/staging has manifests: a missing path sits in
+# ComparisonError and fires ArgoCDAppNotSynced.
 environments:
+  # Image Updater rolls it to the newest :dev digest — infra-manifest/
+  # argocd-image-updater/registrations/proj-wsj27.yaml.
   - name: dev
     sourcePath: k8s/dev
-    automated: false
+    automated: true
+    selfHeal: false
   - name: prod
     sourcePath: k8s/prod
     automated: true

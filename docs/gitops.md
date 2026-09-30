@@ -52,7 +52,7 @@ Secret.
 | **1** | `traefik`, `telemetry-store`, `telemetry-store-buckets`, `external-secrets-config`, `cloudnative-pg`, `barman-cloud-plugin`, `sealed-secrets-key` | Needs wave 0. The telemetry store needs a StorageClass; `external-secrets-config` needs the operator's CRDs to exist before its `ClusterSecretStore` will validate. |
 | **2** | `monitoring`, `postgres`, `dex`, `sealed-secrets` | Needs wave 1. Monitoring needs the telemetry-store buckets (Loki chunks and the Prometheus Thanos sidecar) and the Secrets that `external-secrets-config` materialised. |
 | **3** | `headlamp`, `thanos`, `postgres-databases` | Needs wave 2. Headlamp needs Dex to authenticate against; Thanos needs Prometheus writing blocks; the databases need the server. |
-| **4** | `velero`, `dashboards`, `governance` | Needs everything else. `governance` carries the alerting rules, which need the monitoring stack from wave 2 to exist before they mean anything. |
+| **4** | `velero`, `dashboards`, `governance`, `argocd-image-updater` | Needs everything else. `governance` carries the alerting rules, which need the monitoring stack from wave 2 to exist before they mean anything. `argocd-image-updater` needs the project Applications it patches, which do not exist before the ApplicationSets run. |
 
 **Waves order the *start* of a sync, not its completion.** ArgoCD moves to the
 next wave when the previous wave's resources report healthy, but a resource can

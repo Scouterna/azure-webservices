@@ -1,0 +1,12 @@
+# Chart defaults otherwise. Its RBAC lets the controller patch EVERY Application and
+# read every Secret in argocd — decisions.md entry 27.
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+config:
+  log.level: info

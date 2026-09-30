@@ -37,6 +37,8 @@ revision: main
 #             false → ArgoCD reports drift but changes nothing until a deliberate
 #                     sync. Lets the project keep hand-editing; note a later sync
 #                     DISCARDS those edits (see docs/argocd.md).
+# `selfHeal` optional, default true. false with automated: true syncs on each
+#             commit or new image but leaves hand edits alone in between.
 environments:
   - name: dev
     sourcePath: k8s/dev

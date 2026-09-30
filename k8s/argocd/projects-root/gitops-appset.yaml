@@ -37,6 +37,11 @@ spec:
               # parses it — which is how a nested array from the outer generator
               # is expanded. `elements: []` must be omitted entirely.
               elementsYaml: '{{ .environments | toJson }}'
+  # ArgoCD Image Updater pins dev images here on the live Application; without this
+  # the ApplicationSet would overwrite it on every pass. Entry 27.
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/source/kustomize/images
   template:
     metadata:
       name: '{{.project}}-{{.name}}'
@@ -71,7 +76,8 @@ spec:
   #
   # Prod is normally automated: true so Git is authoritative. Dev is normally
   # false so the project can keep hand-editing; note that a later sync DISCARDS
-  # those edits (docs/argocd.md).
+  # those edits (docs/argocd.md). `automated: true` + `selfHeal: false` is the
+  # middle: syncs on every commit or new image, keeps hand edits in between.
   #
   # syncOptions is repeated here rather than left to the base template: when
   # `automated` is false the patch would otherwise render a bare
@@ -85,7 +91,9 @@ spec:
           - ServerSideApply=true
     {{- if .automated }}
         automated:
-          selfHeal: true
+          # Optional per environment. hasKey, not `default true`: sprig's default
+          # treats false as empty and would turn it back into true.
+          selfHeal: {{ if hasKey . "selfHeal" }}{{ .selfHeal }}{{ else }}true{{ end }}
           # prune off: removing a manifest should not silently delete a running
           # workload. Deleting is deliberate.
           prune: false

@@ -370,6 +370,16 @@ Ask infra for a registration, giving them:
    drift but changes nothing until a deliberate sync). Prod is normally
    automated; dev is often manual so you can keep hand-editing.
 
+   A third option suits dev: **automated without self-heal**. ArgoCD applies
+   every commit, but a hand edit survives until the next one.
+
+   **For dev, infra can also register the environment with ArgoCD Image
+   Updater.** It follows a moving tag such as `:dev`, and each new build is
+   deployed without a commit anywhere
+   ([decisions.md entry 27](decisions.md#27-dev-environments-may-follow-a-moving-image-tag-through-argocd-image-updater)).
+   The environment's path must be a Kustomize directory and must be automated.
+   The deployed digest is recorded on the ArgoCD Application, not in Git.
+
 Infra commits two small files and you are live. You never touch the infra repo.
 
 #### A private repo
