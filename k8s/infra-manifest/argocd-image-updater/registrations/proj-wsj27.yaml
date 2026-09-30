@@ -7,7 +7,6 @@ metadata:
   name: proj-wsj27
   namespace: argocd
 spec:
-  namespace: argocd
   applicationRefs:
     # Exact name, never a glob: a pattern reaching prod or another project would
     # roll it too.
