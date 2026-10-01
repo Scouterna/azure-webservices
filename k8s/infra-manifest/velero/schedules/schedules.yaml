@@ -32,6 +32,10 @@ spec:
       # Has its own CNPG ScheduledBackup at 02:30; still in weekly-full.
       - postgres
     snapshotVolumes: true
+    # Skips Azure Files volumes; see volume-policy.yaml.
+    resourcePolicy:
+      kind: configmap
+      name: volume-policy
     storageLocation: default
 ---
 # Weekly full-cluster backup (all namespaces incl. infra) — safety net.
@@ -48,4 +52,8 @@ spec:
     includedNamespaces:
       - "*"
     snapshotVolumes: true
+    # Skips Azure Files volumes; see volume-policy.yaml.
+    resourcePolicy:
+      kind: configmap
+      name: volume-policy
     storageLocation: default
