@@ -2,12 +2,14 @@ alloy:
   enableReporting: false
   mounts:
     varlog: true
+  # The 470MB binary's page cache counts against the limit; at 220Mi the kernel
+  # thrashes reclaiming it and Alloy hangs without being OOM-killed.
   resources:
     requests:
       cpu: 20m
-      memory: 80Mi
+      memory: 200Mi
     limits:
-      memory: 220Mi
+      memory: 512Mi
   configMap:
     content: |
       loki.write "default" {
