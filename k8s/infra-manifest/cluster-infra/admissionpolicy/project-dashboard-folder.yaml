@@ -1,0 +1,42 @@
+# A project's Grafana dashboard lands in the folder named by its grafana_folder
+# annotation, and the sidecar takes that value as a path (absolute used as-is,
+# `../` honoured). Pin it to the ConfigMap's own namespace, so a project can only
+# write its own folder. docs/decisions.md entry 29.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: project-dashboard-folder
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["configmaps"]
+    # The sidecar's LABEL/LABEL_VALUE; any other value is not loaded.
+    objectSelector:
+      matchLabels:
+        grafana_dashboard: "1"
+  validations:
+    - expression: >-
+        has(object.metadata.annotations) &&
+        'grafana_folder' in object.metadata.annotations &&
+        object.metadata.annotations['grafana_folder'] == request.namespace
+      messageExpression: >-
+        'a Grafana dashboard ConfigMap in a project namespace must carry the ' +
+        'annotation grafana_folder: ' + request.namespace +
+        ' (see docs/decisions.md entry 29)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: project-dashboard-folder-projects
+spec:
+  policyName: project-dashboard-folder
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: scouterna.se/project
+          operator: Exists
