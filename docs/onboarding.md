@@ -1128,7 +1128,9 @@ in the durable backup storage account (external to the cluster).
 >
 > **The only such class is for `disk.csi.azure.com`**, so `disk-*` PVCs are
 > captured and **`files-shared` (Azure Files) volumes are not** — treat a
-> `files-shared` PVC as regenerable state (`decisions.md` entry 23).
+> `files-shared` PVC as regenerable state (`decisions.md` entry 23). The
+> schedules skip those volumes explicitly (`velero/schedules/volume-policy.yaml`);
+> without that, one `files-shared` PVC turns every backup `PartiallyFailed`.
 
 > **`kubectl get volumesnapshot` returns nothing after a successful backup — do
 > not read that as failure.** Velero deletes the temporary `VolumeSnapshot`
