@@ -866,8 +866,8 @@ here: Dex's half in `k8s/infra-manifest/dex/`, the project's half in
 `k8s/projects/<project>/infra/`. No Azure account is needed
 ([decisions.md entry 28](decisions.md#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed)).
 
-> ScoutID staging predates this layout: its half is still sealed in its own
-> GitOps repo. It moves here when that repo is renamed.
+> ScoutID prod follows this layout. ScoutID staging predates it: its half is
+> still sealed in its own GitOps repo, until it moves here.
 
 **From the project:** the redirect URI(s) of its identity provider, and the name
 and key of the Secret it reads in its namespace. ScoutID uses Secret `dex-client`,

@@ -88,11 +88,18 @@ config:
         - https://staging.id.scouterna.se/realms/master/broker/dex/endpoint
         - https://admin.staging.id.scouterna.se/realms/master/broker/dex/endpoint
       secretEnv: SCOUTID_KEYCLOAK_STAGING_CLIENT_SECRET
+    # ScoutID prod Keycloak: same, ahead of the prod environment existing.
+    - id: scoutid-keycloak-prod
+      name: ScoutID Keycloak
+      redirectURIs:
+        - https://id.scouterna.se/realms/master/broker/dex/endpoint
+        - https://admin.id.scouterna.se/realms/master/broker/dex/endpoint
+      secretEnv: SCOUTID_KEYCLOAK_PROD_CLIENT_SECRET
 
 # Inject the GitHub client secret and the Headlamp client secret from the
-# ESO-managed Kubernetes secret `dex-oauth`, and the ScoutID staging client
-# secret from the SealedSecret in this directory, into Dex's environment, so
-# the config templating above can reference them.
+# ESO-managed Kubernetes secret `dex-oauth`, and the ScoutID client secrets
+# from the SealedSecrets in this directory, into Dex's environment, so the
+# config templating above can reference them.
 envVars:
   - name: GITHUB_CLIENT_SECRET
     valueFrom:
@@ -108,6 +115,11 @@ envVars:
     valueFrom:
       secretKeyRef:
         name: dex-scoutid-keycloak-staging   # sealedsecret-scoutid-keycloak-staging.yaml
+        key: client-secret
+  - name: SCOUTID_KEYCLOAK_PROD_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-scoutid-keycloak-prod      # sealedsecret-scoutid-keycloak-prod.yaml
         key: client-secret
 
 ingress:
