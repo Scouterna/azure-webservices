@@ -31,25 +31,27 @@ The `exec` block calls `kubectl oidc-login` — that is [int128/kubelogin][kubel
 
 ## When there is no browser on the machine running kubectl
 
-The default flow needs a browser that can reach `http://localhost:8000` **on the
-machine running `kubectl`** — `oidc-login` starts a local listener there, and the
-login redirect has to come back to it. `--skip-open-browser` only stops the
-auto-launch and prints the URL instead; a browser is still required. WSL is fine,
-because Windows forwards localhost into the VM. A plain SSH session on a remote
-host is not — the browser is then on the wrong machine.
+Use an SSH tunnel. Log in to the remote host from the machine that has the
+browser, forwarding port 8000:
 
-kubelogin has a grant type that needs no local listener: Dex shows a code and you
-paste it into the terminal. It takes two extra args in the `exec` block:
-
-```yaml
-- --grant-type=authcode-keyboard
-- --oidc-redirect-url=urn:ietf:wg:oauth:2.0:oob
+```bash
+ssh -L 8000:127.0.0.1:8000 <remote-host>
+kubectl get pods -n <your-namespace>      # on the remote host; open the printed URL locally
 ```
 
-**This does not work as the cluster stands.** That redirect URL is not registered
-on the `kubectl` client in `k8s/infra-manifest/dex/values.yaml`, so Dex rejects
-the login. Adding it changes shared auth config — ask the infra team rather than
-working around it locally.
+The login ends with a redirect to `http://localhost:8000`. `oidc-login` listens
+for it on the machine running `kubectl`, and the tunnel carries it there. The
+token is cached on the remote host (`~/.kube/cache/oidc-login`), so the tunnel
+is only needed when you have to log in again: after a week without use, and at
+least every 30 days. If port 8000 is taken on the remote host, `oidc-login`
+falls back to 18000; forward that instead.
+
+WSL needs no tunnel: Windows forwards localhost into the VM.
+
+kubelogin's `authcode-keyboard` grant, where you paste a code instead, does not
+work here. Dex rejects it because the `urn:ietf:wg:oauth:2.0:oob` redirect is
+not registered, and it is left out on purpose: it would let a phishing link get
+a user to hand over a working login code.
 
 [kubelogin]: https://github.com/int128/kubelogin
 [releases]: https://github.com/int128/kubelogin/releases

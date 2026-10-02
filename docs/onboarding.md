@@ -248,7 +248,7 @@ RoleBindings grant.
    kubectl get pods -n <namespace>          # works within granted namespaces
    ```
    Open the URL on the **same machine** — the login redirects back to a local
-   port. `k8s/access/README.md` covers the case where you cannot.
+   port. Over SSH, tunnel that port; `k8s/access/README.md` shows how.
 
 [kubelogin]: https://github.com/int128/kubelogin
 [krew]: https://krew.sigs.k8s.io/docs/user-guide/setup/install/
