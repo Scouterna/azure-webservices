@@ -204,6 +204,9 @@ cluster, so it survives a teardown):
 | `daily-projects` | project namespaces (`"*"` minus infra), incl. PVC data | 02:00 daily | 14 days |
 | `weekly-full` | every namespace, infra included | 03:00 Sundays | 90 days |
 
+"PVC data" is a CSI snapshot for `disk-*` volumes and a Kopia file copy by the
+node-agent for `files-shared` volumes (decisions.md entry 30).
+
 **Why the split.** Project namespaces hold state that exists nowhere else, so
 they are backed up daily. Infra namespaces are reproducible from Git via ArgoCD —
 a rebuild is the real recovery path, not a restore — so the weekly full backup is

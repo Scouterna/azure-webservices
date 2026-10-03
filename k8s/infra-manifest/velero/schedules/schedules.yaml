@@ -32,7 +32,7 @@ spec:
       # Has its own CNPG ScheduledBackup at 02:30; still in weekly-full.
       - postgres
     snapshotVolumes: true
-    # Skips Azure Files volumes; see volume-policy.yaml.
+    # File-copies Azure Files volumes; see volume-policy.yaml.
     resourcePolicy:
       kind: configmap
       name: volume-policy
@@ -52,7 +52,7 @@ spec:
     includedNamespaces:
       - "*"
     snapshotVolumes: true
-    # Skips Azure Files volumes; see volume-policy.yaml.
+    # File-copies Azure Files volumes; see volume-policy.yaml.
     resourcePolicy:
       kind: configmap
       name: volume-policy

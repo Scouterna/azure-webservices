@@ -39,6 +39,7 @@ say why rather than deleting it.
 | [27](#27-dev-environments-may-follow-a-moving-image-tag-through-argocd-image-updater) | Dev environments may follow a moving image tag through ArgoCD Image Updater | current |
 | [28](#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed) | Onboarding needs no Azure account: shared project credentials are sealed | current |
 | [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
+| [30](#30-files-shared-volumes-are-backed-up-by-file-copy) | `files-shared` volumes are backed up by file copy | current, amends 23 |
 
 ---
 
@@ -1243,10 +1244,9 @@ variable one nobody is watching.
 
 **Where it sits in the four tiers ([entry 18](#18-persistent-state-has-four-tiers-and-a-disk-is-the-last-one)): it is not a fifth tier, it is a
 narrower one.** For "somewhere to keep files" the answer stays `files-shared` — it
-is already RWX and costs no attached disk. **It is not backed up, though**: Velero
-captures `disk-*` volume contents only, so a `files-shared` PVC holds regenerable
-state (entry 23). This sentence said "already backed up" until 2026-09-19, which
-was wrong in the one direction that costs a project data. A project-facing
+is already RWX, costs no attached disk, and its contents are backed up by file
+copy (entry 30). Before that entry they were not, although until 2026-09-19
+this sentence said they were. A project-facing
 object store is only the right answer when the application genuinely speaks S3:
 an SDK, presigned URLs, versioned objects, or a library that has no filesystem
 mode. That is a real requirement when it appears, and it is the *only* case that
@@ -1658,9 +1658,8 @@ the shared account is reachable over its public endpoint. Reaching the key now
 requires `kube-system` (i.e. the node), and on a single-node cluster node access is
 already total compromise — the same premise [security.md](security.md) §1 sets out,
 not a new exposure. The account is created in the node resource group by default,
-so its contents do **not** survive a cluster teardown; `files-shared` is for
-regenerable state, and durable data belongs in the shared PostgreSQL or a backed-up
-tier.
+so the share itself does **not** survive a cluster teardown; its contents come
+back from Velero's file-copy backup in the durable backup account (entry 30).
 
 **Rejected: per-project storage accounts.** Would need one StorageClass per project
 (the class pins at most one `storageAccount`, which must pre-exist) or a per-project
@@ -1997,3 +1996,66 @@ that the policy never saw.
 - **The Grafana ServiceAccount can still read Secrets in every namespace.** The
   chart hardcodes `secrets` in its ClusterRole whatever `resource` says; dropping
   it needs a committed ClusterRole via `rbac.useExistingClusterRole`.
+
+## 30. `files-shared` volumes are backed up by file copy
+
+**Current.** Velero's node-agent runs (`deployNodeAgent: true`,
+[`velero/values.yaml`](../k8s/infra-manifest/velero/values.yaml)), and the
+volume policy
+([`schedules/volume-policy.yaml`](../k8s/infra-manifest/velero/schedules/volume-policy.yaml))
+sends every `file.csi.azure.com` volume to `fs-backup`. Both schedules use it.
+Kopia copies the share's files into the same `velero` container in the durable
+backup account that already holds the backups. `disk-*` volumes keep their CSI
+snapshots.
+
+**Why.** `files-shared` is the only tier that holds files without spending an
+attach slot (entry 18), so it is where a project's file state goes when a disk
+PVC is ruled out. Its contents were never backed up. That was not a decision:
+`deployNodeAgent: false` came with the initial install, entry 17 assumed the
+opposite until 2026-09-19, and the docs then described the gap as "regenerable
+state". It held for the first PVC, a cache rebuilt hourly. It does not hold for
+the next one.
+
+**Cost.**
+
+- **Blob:** the copied data, deduplicated and incremental after the first run.
+  Cents per GB a month.
+- **Azure Files operations:** after the first run, Kopia lists the tree and reads
+  only changed files. That is roughly one operation per file per backup, so a
+  daily backup of 10,000 files is about 300,000 operations a month: an estimated
+  $2, less than the smallest disk (entry 18). A few hundred files cost cents.
+  Sundays run twice, because `weekly-full` covers the same volumes.
+- **Node:** one node-agent pod per node (requests 50m / 128Mi). For each volume
+  it backs up, it starts a short-lived pod in `velero`. No attach slot.
+
+**How it authenticates.** The node-agent runs as the `velero` ServiceAccount and
+carries the `azure.workload.identity/use` label. Velero copies that label onto
+the backup and restore pods it spawns, so they reach Blob through the same
+managed identity. Without the label, those pods have no credential.
+
+**Rejected:**
+
+- *A VolumeSnapshotClass for `file.csi.azure.com`.* Share snapshots stay in the
+  share's own storage account, which is in the node resource group (entry 23).
+  They would be lost with the share in a teardown, the case a backup is for.
+- *Azure Backup for Azure Files.* It needs a Recovery Services vault and is
+  priced per protected share. It would also have to protect a storage account
+  that the CSI driver creates in the node resource group, outside Bicep.
+- *Moving the data to a `disk-*` PVC.* Each one spends an attach slot from a
+  budget that is already half used (entry 18).
+- *File copy for every volume.* Disk snapshots are point-in-time and cost no
+  operations. Only Azure Files lacks a snapshot path that survives a teardown.
+
+**Not solved.**
+
+- **Only mounted volumes are copied.** The node-agent reads the volume through
+  a running pod's mount. A `files-shared` PVC that no pod mounts at backup time
+  is skipped without an error.
+- **Not point-in-time.** Files are read from the live share, so a file being
+  written during the backup can be captured half-written. That is acceptable for
+  file state, and SQLite on this tier is already ruled out (entry 18).
+- **The Kopia repository key is Velero's static default.** Anyone who can read
+  the `velero` container can decrypt the copies. That is no new exposure: the
+  same container already holds every backed-up `Secret`, readable to the same
+  people. The default is kept on purpose, so that a rebuilt cluster can read the
+  repository without a separately preserved key.
