@@ -9,11 +9,10 @@ data:
   policy.yaml: |
     version: v1
     volumePolicies:
-      # Azure Files (files-shared) has no VolumeSnapshotClass, so a snapshot
-      # attempt fails the whole backup as PartiallyFailed. Its contents are not
-      # backed up by design (decisions.md entry 23); the PVC object still is.
+      # Azure Files (files-shared) has no VolumeSnapshotClass; copy its files
+      # with the node-agent instead — decisions.md entry 30.
       - conditions:
           csi:
             driver: file.csi.azure.com
         action:
-          type: skip
+          type: fs-backup

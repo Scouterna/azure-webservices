@@ -204,6 +204,9 @@ cluster, so it survives a teardown):
 | `daily-projects` | project namespaces (`"*"` minus infra), incl. PVC data | 02:00 daily | 14 days |
 | `weekly-full` | every namespace, infra included | 03:00 Sundays | 90 days |
 
+"PVC data" is a CSI snapshot for `disk-*` volumes and a Kopia file copy by the
+node-agent for `files-shared` volumes (decisions.md entry 30).
+
 **Why the split.** Project namespaces hold state that exists nowhere else, so
 they are backed up daily. Infra namespaces are reproducible from Git via ArgoCD —
 a rebuild is the real recovery path, not a restore — so the weekly full backup is
@@ -275,10 +278,10 @@ resources are expected there. On `daily-projects` it is not; investigate.
 > only the durable Azure snapshot), and `--include-resources` silently breaks
 > CSI restores unless it also names `volumesnapshots,volumesnapshotcontents`.
 >
-> **The scheduled backups do not yet exercise volumes.** `daily-projects`
-> excludes every infra namespace and no project has a PVC, so the nightlies so
-> far captured object state only. A green `Completed` on a nightly is not
-> evidence that volume backup works — that only starts once a project has a PVC.
+> **The nightlies exercise file copy only.** Every project PVC so far is
+> `files-shared`, so `daily-projects` tests the node-agent path (decisions.md
+> entry 30) and never a disk snapshot. Only `weekly-full` snapshots disks, the
+> infra ones. A green nightly says nothing about disk restores.
 
 ## Upstream withdrawal
 

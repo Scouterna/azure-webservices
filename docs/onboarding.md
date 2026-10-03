@@ -1072,10 +1072,11 @@ spec:
       storage: 1Gi
 ```
 
-Mount it as usual. **It is not backed up.** Velero snapshots `disk-*` volumes but
-not Azure Files (see the Velero note below), so a `files-shared` PVC holds
-regenerable state only — anything you cannot lose belongs in the shared PostgreSQL
-or a `disk-*` PVC. See `decisions.md` entry 23.
+Mount it as usual. **It is backed up daily by file copy, but only while a pod
+mounts it.** Velero copies the files through the running pod's mount, so a PVC
+that no pod mounts at 02:00 is skipped without an error. The copy is not
+point-in-time: a file being written during the backup can be captured
+half-written. See the Velero note below and `decisions.md` entry 30.
 
 **Why this one does not cost a disk.** `files-shared` is backed by
 `file.csi.azure.com` — an SMB share over the network, not a block device
@@ -1112,7 +1113,7 @@ needed.** Velero runs two schedules (`k8s/infra-manifest/velero/schedules/`):
 
 | Schedule | What | When | Retention |
 |---|---|---|---|
-| `daily-projects` | every project namespace (all except infra ns), **incl. `disk-*` PVC data** | 02:00 daily | 14 days |
+| `daily-projects` | every project namespace (all except infra ns), **incl. PVC data** | 02:00 daily | 14 days |
 | `weekly-full` | the whole cluster (all namespaces) as a safety net | 03:00 Sundays | 90 days |
 
 So a project asking "please back up my PVC" already has it: their namespace and
@@ -1126,11 +1127,12 @@ in the durable backup storage account (external to the cluster).
 > weekly full backup may report `PartiallyFailed` on a few un-snapshottable
 > cluster resources — that's expected; it's a best-effort safety net.)
 >
-> **The only such class is for `disk.csi.azure.com`**, so `disk-*` PVCs are
-> captured and **`files-shared` (Azure Files) volumes are not** — treat a
-> `files-shared` PVC as regenerable state (`decisions.md` entry 23). The
-> schedules skip those volumes explicitly (`velero/schedules/volume-policy.yaml`);
-> without that, one `files-shared` PVC turns every backup `PartiallyFailed`.
+> **The only such class is for `disk.csi.azure.com`.** `files-shared` (Azure
+> Files) volumes are copied file by file instead, by Velero's node-agent with
+> Kopia (`velero/schedules/volume-policy.yaml`, `decisions.md` entry 30). Verify
+> them with `velero backup describe <backup-name> --details`, under
+> `Pod Volume Backups`. A `files-shared` PVC that no pod mounts is not in that
+> list.
 
 > **`kubectl get volumesnapshot` returns nothing after a successful backup — do
 > not read that as failure.** Velero deletes the temporary `VolumeSnapshot`
@@ -1180,7 +1182,13 @@ Restores need the Velero CLI (`velero` — install from the Velero releases) wit
      --include-namespaces <project>-prod \
      --include-resources persistentvolumeclaims,persistentvolumes,volumesnapshots,volumesnapshotcontents
    ```
-5. **Watch it**:
+5. **A `files-shared` volume is refilled after its pod starts.** Velero
+   recreates the PVC empty and adds an init container (`restore-wait`) to the
+   restored pod. The init container blocks the app until the node-agent has
+   copied the files back. A pod stuck in `Init` during a restore is waiting
+   for that copy; `velero restore describe <restore-name> --details` shows its
+   progress under `Pod Volume Restores`.
+6. **Watch it**:
    ```bash
    velero restore describe <restore-name>
    velero restore logs <restore-name>
