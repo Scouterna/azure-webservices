@@ -278,10 +278,10 @@ resources are expected there. On `daily-projects` it is not; investigate.
 > only the durable Azure snapshot), and `--include-resources` silently breaks
 > CSI restores unless it also names `volumesnapshots,volumesnapshotcontents`.
 >
-> **The scheduled backups do not yet exercise volumes.** `daily-projects`
-> excludes every infra namespace and no project has a PVC, so the nightlies so
-> far captured object state only. A green `Completed` on a nightly is not
-> evidence that volume backup works — that only starts once a project has a PVC.
+> **The nightlies exercise file copy only.** Every project PVC so far is
+> `files-shared`, so `daily-projects` tests the node-agent path (decisions.md
+> entry 30) and never a disk snapshot. Only `weekly-full` snapshots disks, the
+> infra ones. A green nightly says nothing about disk restores.
 
 ## Upstream withdrawal
 

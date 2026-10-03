@@ -2014,7 +2014,7 @@ PVC is ruled out. Its contents were never backed up. That was not a decision:
 `deployNodeAgent: false` came with the initial install, entry 17 assumed the
 opposite until 2026-09-19, and the docs then described the gap as "regenerable
 state". It held for the first PVC, a cache rebuilt hourly. It does not hold for
-the next one.
+the next one, a CMS's uploaded media (`wsj27-cms-media`).
 
 **Cost.**
 
@@ -2027,6 +2027,12 @@ the next one.
   Sundays run twice, because `weekly-full` covers the same volumes.
 - **Node:** one node-agent pod per node (requests 50m / 128Mi). For each volume
   it backs up, it starts a short-lived pod in `velero`. No attach slot.
+
+**What the node-agent can reach.** It runs as root, not privileged, with hostPath
+mounts of `/var/lib/kubelet/pods` and `/var/lib/kubelet/plugins`, so it can read
+every pod's volumes on the node, ServiceAccount tokens included. That grants no
+new power: it runs as the `velero` ServiceAccount, which the chart binds to
+`cluster-admin`.
 
 **How it authenticates.** The node-agent runs as the `velero` ServiceAccount and
 carries the `azure.workload.identity/use` label. Velero copies that label onto
