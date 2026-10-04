@@ -326,7 +326,8 @@ that references this workspace by name.
 
 ```bash
 # filterAuditNoise=false: the noise filter targets a table that does not exist yet.
-# §11 re-runs this without it. decisions.md entry 9.
+# §11 re-runs this without it. On a rebuild the table exists — drop the flag here,
+# or the filter is unlinked until §11. decisions.md entry 9.
 az deployment group create -g $INFRA_RG -f infra/loganalytics.bicep \
   -p workspaceName=$LOG_WORKSPACE -p filterAuditNoise=false
 ```
