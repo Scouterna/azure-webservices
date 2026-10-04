@@ -325,8 +325,10 @@ investigating. Do this **before §7a** — the cluster carries a diagnostic sett
 that references this workspace by name.
 
 ```bash
+# filterAuditNoise=false: the noise filter targets a table that does not exist yet.
+# §11 re-runs this without it. decisions.md entry 9.
 az deployment group create -g $INFRA_RG -f infra/loganalytics.bicep \
-  -p workspaceName=$LOG_WORKSPACE
+  -p workspaceName=$LOG_WORKSPACE -p filterAuditNoise=false
 ```
 
 > **What a wrong name actually does.** The cluster's reference is `existing`, which
@@ -1201,6 +1203,26 @@ history quietly lost.
 Expect `30` and `365`. A `TableNotFound` error means no audit row has landed yet —
 go back to the query above; the table is created by the first event, not by §5b.
 Archived rows need a search job or restore to query, not a plain `query` call.
+
+**Then switch on the noise filter.** §5b deployed without it. Without it, an idle
+cluster runs into the 1 GB daily cap within days ([decisions.md](decisions.md)
+entry 9):
+
+```bash
+az deployment group create -g $INFRA_RG -f infra/loganalytics.bicep \
+  -p workspaceName=$LOG_WORKSPACE
+
+az monitor log-analytics workspace show -g $INFRA_RG -n $LOG_WORKSPACE \
+  --query defaultDataCollectionRuleResourceId -o tsv   # must end in /$LOG_WORKSPACE-transform
+```
+
+The proof that it is working is the next day's volume. That should be well under
+half a GB:
+
+```bash
+az monitor log-analytics query --workspace "$WORKSPACE_GUID" \
+  --analytics-query "Usage | where TimeGenerated > ago(3d) and IsBillable | summarize GB=sum(Quantity)/1024 by bin(TimeGenerated, 1d)" -o table
+```
 
 **Once rows are arriving, settle one open question:** whether audit records carry
 Secret contents. `AKSAuditAdmin` has a `RequestObject` column and this category
