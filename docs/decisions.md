@@ -225,7 +225,8 @@ higher-severity gap: reserving the infra hostnames (entry 22).
 
 **Current.** A diagnostic setting on the cluster ships the `kube-audit-admin`
 category to a Log Analytics workspace in the durable infra RG, capped at 1 GB/day
-with 30-day retention.
+with 30-day retention. A workspace transformation drops platform lease renewals
+before they count against the cap.
 
 **Why off-cluster, in the durable RG.** An audit log exists to answer "what
 happened", including when what happened is the cluster being destroyed. Storing it
@@ -264,6 +265,43 @@ fill 1 GB in minutes, after which everything they do is unrecorded until the UTC
 day rolls over. The flood itself is visible in the rows ingested before the cap,
 but only to someone looking. The Azure-side cap alert below is what makes it
 noticed rather than merely recorded.
+
+**Lease renewals are dropped at ingestion, not paid for.** The 1 GB/day guess
+turned out wrong in practice: an idle cluster ingested 0.97 GB/day on its first
+full day and 1.10 GB/day two weeks later, and the cap first cut ingestion on
+2026-10-04. About 60% of it was leader-election `update`s on `leases` — `aksService`
+(the managed control plane) alone renews ~3 per second, and every operator with
+leader election adds ~40k a day. They record nothing an investigation needs.
+
+`loganalytics.bicep` therefore carries a workspace transformation DCR that drops a
+row only when all of these hold: verb `update`, resource `leases`, the lease in a
+platform namespace (`kube-system`, `kube-node-lease`, `argocd`, `cnpg-system`,
+`postgres`), and the caller `aksService` or `system:*`. The namespace condition is
+what keeps this from becoming a hiding place: a tenant can write leases only in its
+own namespace, and a human identity (`aks:jwt:*`, `masterclient`) is never
+`system:*`. Lease `create`/`delete` stays, as does everything else. Measured on a
+real day: 877 MB → 355 MB.
+
+- **Why not raise the cap.** It doubles a recurring bill to store noise, and the
+  noise grows with every operator added.
+- **Why not drop all `leases`.** A tenant's own leases are in its namespace and
+  stay recorded, so the flood case above still lands before the cap.
+- **What it costs.** The daily cap counts data *after* the transformation, which
+  is the point. Azure bills a processing charge on whatever is dropped beyond 50%
+  of incoming — about 10% of a GB a day here, i.e. cents a month.
+- **A new platform namespace** with a leader-elected operator is *not* covered until
+  it is added to the list. Its renewals are logged and cost money, which is the
+  safe failure.
+- **The rule needs the table, presumably.** Like the archive setting below, the DCR
+  targets `AKSAuditAdmin`, which does not exist until the diagnostic setting has
+  created it. Whether Azure rejects the rule before then has not been tested, so a
+  first install deploys with `filterAuditNoise=false` and re-runs in
+  [install.md](install.md) §11. The default is `true` on purpose: a redeploy that
+  omits the link would silently unhook the filter.
+
+**Revisit if** the filtered volume climbs back towards the cap. That is an alert on
+`audit-ingestion-capped` again, and the answer is a fresh look at what dominates —
+not reflexively a bigger cap.
 
 **30 days interactive, one year archived.** Log Analytics includes 31 days of
 interactive retention at no extra cost, so 30 is the longest queryable window with

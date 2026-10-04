@@ -33,11 +33,57 @@ param retentionInDays int = 30
 @minValue(-1)
 param dailyQuotaGb int = 1
 
+@description('Drop platform lease renewals at ingestion. false only on a first install, before the AKSAuditAdmin table exists — docs/decisions.md 9.')
+param filterAuditNoise bool = true
+
 @description('Resource tags.')
 param tags object = {
   ManagedBy: 'Bicep'
   Initiative: 'webservices-cluster'
   Purpose: 'audit-logs'
+}
+
+// Leader-election renewals by platform identities in platform namespaces: ~60% of
+// the volume, no audit value. Tenants cannot write leases here, and a human
+// identity is never `system:*`, so neither can hide behind this. docs/decisions.md 9.
+var auditNoiseKql = '''
+source
+| where not(
+    Verb == "update"
+    and tostring(ObjectRef.resource) == "leases"
+    and tostring(ObjectRef.namespace) in ("kube-system", "kube-node-lease", "argocd", "cnpg-system", "postgres")
+    and (tostring(User.username) == "aksService" or tostring(User.username) startswith "system:"))
+'''
+
+// Destination by computed ID, not a symbolic reference: the workspace points back
+// at this rule, and a symbolic reference both ways is a cycle.
+resource auditTransform 'Microsoft.Insights/dataCollectionRules@2023-03-11' = if (filterAuditNoise) {
+  name: '${workspaceName}-transform'
+  location: location
+  tags: tags
+  kind: 'WorkspaceTransforms'
+  properties: {
+    dataSources: {}
+    destinations: {
+      logAnalytics: [
+        {
+          name: 'workspace'
+          workspaceResourceId: resourceId('Microsoft.OperationalInsights/workspaces', workspaceName)
+        }
+      ]
+    }
+    dataFlows: [
+      {
+        streams: [
+          'Microsoft-Table-AKSAuditAdmin'
+        ]
+        destinations: [
+          'workspace'
+        ]
+        transformKql: auditNoiseKql
+      }
+    ]
+  }
 }
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -52,6 +98,8 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
     workspaceCapping: {
       dailyQuotaGb: dailyQuotaGb
     }
+    // Omitting it on a redeploy unlinks the filter, hence the default-true param.
+    defaultDataCollectionRuleResourceId: filterAuditNoise ? auditTransform.id : null
     features: {
       // false = querying requires a grant on THIS workspace. Left off deliberately:
       // with resource-context, read on the cluster is enough. docs/decisions.md 9.
