@@ -56,8 +56,9 @@ a non-expiring credential that survives revoking the binding. See
 [docs/onboarding.md](docs/onboarding.md).
 
 **Ask before committing or pushing.** Branch and stage freely; let a human
-approve the commit. `/k8s/`, `/infra/`, `/monitoring/` and `/.github/` are
-CODEOWNERS-protected and merge through a PR.
+approve the commit. `main` takes changes through a squash-merged PR, and
+`/k8s/`, `/infra/`, `/monitoring/` and `/.github/` also need a CODEOWNERS
+review. Only a maintainer decides to bypass that.
 
 ## Synced ≠ working
 
@@ -82,7 +83,8 @@ exists; for an issuer, that the Certificate is `Ready`.
 
 ## CI, and the placeholder trap
 
-[`.github/workflows/checks.yml`](.github/workflows/checks.yml) runs on every PR:
+[`.github/workflows/checks.yml`](.github/workflows/checks.yml) runs on every PR
+and every push to `main`:
 
 - **placeholders** — `scripts/check-placeholders.sh --expect-filled`
 - **manifests** — every YAML under `k8s/` parses
@@ -91,6 +93,8 @@ exists; for an issuer, that the Certificate is `Ready`.
   namespace consuming it is permitted by it
 - **decisions-pointers** — every "entry N" reference into `docs/decisions.md`
   resolves and is gap-free
+- **rule-counts** — rule counts written in prose in the docs match the
+  platform-health alert rules
 
 > **The trap:** `main` now carries the live install's *filled-in* values, so CI
 > checks `--expect-filled`. But the opt-in pre-commit hook
@@ -103,6 +107,37 @@ exists; for an issuer, that the Certificate is `Ready`.
 When you add a CI check, make sure it fails for the right reason: run it against
 a deliberately broken tree once. Several checks here exist because something
 passed while being wrong.
+
+## Issues
+
+Work and open questions are tracked as GitHub Issues in this repo. There is no
+project board. The style follows the other Scouterna repos (WSJ27):
+
+- **Every issue has a type**: `Feature`, `Bug` or `Task`. These are org-level
+  issue types, not labels: `gh issue create --type Feature`.
+- **The title is a plain sentence** naming the need, with no `feat:` prefix.
+- **The body uses fixed headings**, and an optional section with nothing to say
+  is left as `_No response_`:
+  - Feature: `### Problem`, `### Who is this for?`, `### Proposal`,
+    `### Acceptance criteria`, `### Alternatives and notes`
+  - Bug: `### What happened?`, `### Steps to reproduce`, `### Expected behavior`,
+    `### Who is affected?`, `### Environment`, `### Additional context`
+  - Task: `### Task`, `### Done when`, `### Notes`
+- **An investigation is a Feature** whose Proposal lists the open questions, with
+  Acceptance criteria `_No response_` until they are settled. If the answer is
+  no, close it as *not planned* and say why.
+- **Write for the reader of the issue**: what projects or maintainers get, in plain
+  words. Point at "decisions.md entry N" rather than repeating rationale; code
+  and file paths belong in the PR.
+- **Labels are `component:<area>`**, color `0969da`, one per area touched
+  (`component:storage` so far). Add a new one when an area first needs it.
+- **Assign an issue only when someone is actually working on it.**
+- **Link the work**: put `(#N)` in the PR title or commit subject, and
+  `Fixes #N` in the PR description or commit body, so the issue closes when the
+  work reaches `main`. When it closes, rewrite the body to say what was done
+  instead of appending a history.
+- Creating, editing or closing an issue is public. An agent does it only when a
+  maintainer asked for it.
 
 ## Conventions
 
@@ -132,7 +167,7 @@ k8s/argocd/projects-root/    ApplicationSets: project infra, and project GitOps 
 k8s/infra-manifest/<svc>/    Helm values + raw manifests for one common service
 k8s/projects/_template/      copy this to onboard a project
 docs/                        runbooks — start at docs/README.md
-scripts/                     check-placeholders.sh, new-project-db.sh, hooks
+scripts/                     CI checks, project DB/backup onboarding, hooks
 ```
 
 Adding a common service is one file: an `Application` in `k8s/argocd/infra-apps/`.
