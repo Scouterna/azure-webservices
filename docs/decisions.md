@@ -495,6 +495,18 @@ alongside a second round of `NodeDiskIOSaturation`. A 30-day window assumes a
 cluster that can afford to keep and re-scan 30 days of high-cardinality apiserver
 histograms; this is one node with a 500 IOPS disk.
 
+**`KubeClientErrors` is disabled too, on 2026-10-10.** It watches only the API
+server's own outgoing calls (`job="apiserver"`), and on AKS that scrape target is
+one address in front of several API-server replicas. Successive scrapes land on
+different replicas (the process start time changed 55 times in an hour), so when
+two replicas' counters differ, every switch looks like a counter reset and
+`rate()` counts the whole counter as new errors. When it fired for five hours, the
+500 counter had sat at 39 on one replica and 41 on the other all day: zero real
+errors, a 3.9% error rate on paper. A higher threshold would only move the line
+the artifact has to cross, and the Standard control-plane tier would not help.
+`KubeAggregatedAPIErrors`, `KubeAggregatedAPIDown` and `KubeAPITerminatedRequests`
+read the same target the same way and stay enabled until they misfire.
+
 **Setting `config` replaces the chart default wholesale**, so the four inhibit
 rules are carried over by hand rather than inherited. They are what stops one
 critical alert dragging its warning and info siblings along. Dropping them would
