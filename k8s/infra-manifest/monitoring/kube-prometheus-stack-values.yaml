@@ -154,6 +154,10 @@ defaultRules:
     kubeApiserverBurnrate: false
     kubeApiserverSlos: false
     kubeApiserverAvailability: false
+  # Scrapes alternate between AKS API-server replicas behind one target, so every
+  # switch reads as a counter reset and rate() invents 5xx. decisions.md entry 11.
+  disabled:
+    KubeClientErrors: true
 
 # AKS does not expose the controller manager or the scheduler, and Cilium
 # replaces kube-proxy, so all three Services sit with zero endpoints and their
