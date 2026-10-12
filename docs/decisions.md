@@ -2094,8 +2094,10 @@ that the policy never saw.
 
 **Not solved.**
 
-- **A folder is not access control.** Every Viewer sees every folder, and any
-  namespace's metrics through Explore (onboarding.md, Grafana). Per-team folder
+- **A folder is not access control.** Every Viewer sees every folder, and can
+  query any namespace's metrics and logs; a dashboard's queries are not checked
+  against the viewer. Explore is Editor-only, which narrows the UI, not the data
+  (onboarding.md, Grafana). Per-team folder
   permissions need GitHub team sync, a Grafana Enterprise feature.
 - **Dashboard `uid`s are global.** A project reusing an infra dashboard's uid
   can shadow it. The policy language has no JSON parser, so a naming rule in
