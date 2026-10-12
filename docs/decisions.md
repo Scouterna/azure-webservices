@@ -949,6 +949,63 @@ take milliseconds when the disk is not contended. Neither guard makes seven days
 fast. Reading long ranges from the bucket instead is entry 25: through Thanos they
 take about a second, once the sidecar stops serving Prometheus's own copy of them.
 
+## Round five: the telemetry store
+
+**On 2026-10-12 `NodeDiskIOSaturation` fired on `nvme0n1`, the OS disk, at
+12:31Z.** It had been pending on and off since 06:05Z, with queue depth spiking
+to 50-108 roughly every hour. Rule groups were cheap (worst 0.027 s), so the
+rule engine was out at once.
+
+The reader was the telemetry store's server container: **1,386 GB off the OS
+disk in seven hours**, against 1,418 GB for the whole device (blkio and
+node-exporter agree). The day before it read 11 GB. Its data lives on its own
+PVC, so OS-disk reads can only be its image.
+
+**Its own executable, paged back in from the image.** Process `read_bytes` went
+from about 3 to 50-90 MB/s at onset while `rchar` stayed flat at 0.4 MB/s, and
+major faults went from zero to 1-4 a second. The IO did not come through
+`read()`; it came through page faults on file-backed mappings. S3 request rates,
+scanner rate, goroutines and resident memory were all flat across the onset, so
+no client asked for more.
+
+**Kernel slab took half the limit.** The cgroup's `memory.stat`, read at 15:13Z:
+
+| | |
+|---|---|
+| `memory.max` vs `memory.current` | 1 GiB, at **99.98%** |
+| `anon` | 416 MB |
+| `slab_reclaimable` | **528 MB** |
+| `file` / of which `file_mapped` | **125 MB / 13 MB** |
+| `memory.events` max vs `oom_kill` | 20,527 vs **0** |
+| objects in the store | ~175,000, growing ~8,000 a day |
+
+The slab is inodes and dentries for the store's on-disk tree, which grows with
+object count. It is reclaimable, but direct reclaim takes file pages first, so
+the binary's mapped pages were squeezed to 13 MB and kept being re-read.
+
+**Every byte read was a page it had already had.** Lifetime totals since the pod
+started on 2026-10-03: `workingset_refault_file` **3,392 GB**, process
+`read_bytes` **3,544 GB**, `rchar` 378 GB. Refaults are 96% of what it read
+from disk. The cliff is the same as round four's; only the thing evicted
+differs, the binary rather than data. By 14:28Z the bursts reached **204 MB/s**,
+the VM's uncached cap for all its disks combined.
+
+**`2Gi` limit, `1Gi` request.** The request covers what it already used at rest;
+the limit leaves about a gigabyte of headroom. At ~8,000 objects a day, slab
+growth will eat into it; `memory.stat` is the place to look when this recurs. Node memory requests go from 72% to
+76%.
+
+**The Deployment now uses `Recreate`.** The chart's default `RollingUpdate`
+(`maxSurge: 100%`, `maxUnavailable: 0`) starts the new server before stopping the
+old one, and on a single node an RWO volume lets both mount the same drive. The
+2026-09-25 image change dodged it only because the old pod was already failing
+to pull; a resource change like this one would not. Cost: Loki and Thanos lose the store for
+the seconds a restart takes, which they already tolerate.
+
+**`ContainerDiskReadSustained` went pending and never fired.** The reads came in
+bursts, so the 15-minute rate dropped below 50 MB/s between them and reset the
+2-hour `for:` each time. That is a gap in the rule, left for its own change.
+
 ## 12. GitOps is ArgoCD, not Flux
 
 **Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
