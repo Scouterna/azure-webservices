@@ -60,10 +60,12 @@ ingressRoute:
   dashboard:
     enabled: false
 
-# Chart v41 renamed `logs:` to `log:`; `accessLog: {}` enables access logs.
+# Chart v41 renamed `logs:` to `log:`. Access logs are off unless
+# `accessLog.enabled` is set; `accessLog: {}` alone is a no-op.
 log:
   level: WARN
-accessLog: {}
+accessLog:
+  enabled: true
 
 metrics:
   prometheus:
