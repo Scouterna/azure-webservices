@@ -968,20 +968,31 @@ major faults went from zero to 1-4 a second. The IO did not come through
 scanner rate, goroutines and resident memory were all flat across the onset, so
 no client asked for more.
 
+**Kernel slab took half the limit.** The cgroup's `memory.stat`, read at 15:13Z:
+
 | | |
 |---|---|
-| limit vs usage | 1 GiB, **1,073 of 1,074 MB** |
-| resident / page cache | ~470 MB / **~100 MB** |
-| unaccounted (likely slab) | ~500 MB |
+| `memory.max` vs `memory.current` | 1 GiB, at **99.98%** |
+| `anon` | 416 MB |
+| `slab_reclaimable` | **528 MB** |
+| `file` / of which `file_mapped` | **125 MB / 13 MB** |
+| `memory.events` max vs `oom_kill` | 20,527 vs **0** |
 | objects in the store | ~175,000, growing ~8,000 a day |
 
-That this is the same cliff as round four is an inference: the cgroup's own
-`memory.stat` was not read. The ~500 MB not in resident or cache was most likely
-kernel slab — inodes and dentries for the store's on-disk tree, which grows with
-object count — squeezing the cache until the binary's hot pages no longer fit.
+The slab is inodes and dentries for the store's on-disk tree, which grows with
+object count. It is reclaimable, but direct reclaim takes file pages first, so
+the binary's mapped pages were squeezed to 13 MB and kept being re-read.
+
+**Every byte read was a page it had already had.** Lifetime totals since the pod
+started on 2026-10-03: `workingset_refault_file` **3,392 GB**, process
+`read_bytes` **3,544 GB**, `rchar` 378 GB. Refaults are 96% of what it read
+from disk. The cliff is the same as round four's; only the thing evicted
+differs, the binary rather than data. By 14:28Z the bursts reached **204 MB/s**,
+the VM's uncached cap for all its disks combined.
 
 **`2Gi` limit, `1Gi` request.** The request covers what it already used at rest;
-the limit leaves about a gigabyte of headroom. Node memory requests go from 72% to
+the limit leaves about a gigabyte of headroom. At ~8,000 objects a day, slab
+growth will eat into it; `memory.stat` is the place to look when this recurs. Node memory requests go from 72% to
 76%.
 
 **The Deployment now uses `Recreate`.** The chart's default `RollingUpdate`
