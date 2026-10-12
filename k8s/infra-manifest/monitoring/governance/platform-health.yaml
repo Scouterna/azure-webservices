@@ -174,24 +174,25 @@ spec:
           # NodeDiskIOSaturation names a device; this names the container, the step
           # that has cost time every round. blkio, NOT container_fs_reads_bytes_total
           # — that one over-reported Prometheus 50x against both node-exporter and
-          # /proc. for: 2h because investigating this cluster reads almost as hard as
-          # an incident does; only the incident stays flat. decisions.md entry 11.
+          # /proc. [2h] window, not [15m] + long for: — a refault thrash can come in
+          # bursts, and every gap reset the for:. decisions.md entry 11.
           expr: |
             sum by (namespace, pod, container) (
-              rate(container_blkio_device_usage_total{operation="Read", container!=""}[15m])
-            ) > 50e6
-          for: 2h
+              rate(container_blkio_device_usage_total{operation="Read", container!=""}[2h])
+            ) > 40e6
+          for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "{{ $labels.namespace }}/{{ $labels.pod }} has read {{ $value | humanize }}B/s from disk for 2h"
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} has averaged {{ $value | humanize }}B/s of disk reads over 2h"
             description: >-
               One container is sustaining disk reads far above anything healthy on
-              this cluster. Check its memory limit first: if working set sits just
-              under the limit while oom_kill stays 0, it is refaulting page cache,
-              not doing work — compare memory.current against memory.max in the
-              cgroup and raise the limit. Otherwise look for a large range query
-              or an unbounded scan.
+              this cluster. Check its memory limit first: if the cgroup sits at
+              memory.max while oom_kill stays 0, it is refaulting page cache, not
+              doing work. In the cgroup's memory.stat, compare
+              workingset_refault_file against the reads, and look at what holds
+              the rest (anon, slab); then raise the limit. Otherwise look for a
+              large range query or an unbounded scan.
 
         - alert: ArgoCDAppNotSynced
           # If ArgoCD stops converging, every control in this repo silently stops
