@@ -51,6 +51,9 @@ environments:
     sourcePath: k8s/dev
     automated: true
     selfHeal: false
+  - name: staging
+    sourcePath: k8s/staging
+    automated: true
   - name: prod
     sourcePath: k8s/prod
     automated: true
