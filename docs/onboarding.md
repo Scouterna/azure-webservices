@@ -275,12 +275,14 @@ Two consequences worth knowing:
   the Grafana UI works until they next sign in, then reverts. Team membership is
   the source of truth; the UI role dropdown is effectively read-only.
 - **A role limits what you can *do*, not what you can *see*.** Grafana queries a
-  single shared Prometheus and Loki, so any Viewer can read any namespace's
-  metrics and logs — including through Explore, with no dashboard involved.
-  Kubernetes RBAC does **not** apply to these queries. Per-project data
-  isolation is a separate, unimplemented design; until it exists, treat
-  everything in Grafana as visible to all of Scouterna, and keep genuinely
-  sensitive values out of logs.
+  single shared Prometheus and Loki, and a Viewer can query either for any
+  namespace: the [Logs](#logs) dashboard offers every namespace, and a
+  dashboard's queries are not checked against who views it. Viewers cannot open
+  Explore, but that limits the UI, not the data. Kubernetes RBAC does **not**
+  apply to these queries. Per-project log isolation is planned
+  ([#68](https://github.com/Scouterna/azure-webservices/issues/68)); until it
+  exists, treat everything in Grafana as visible to all of Scouterna, and keep
+  genuinely sensitive values out of logs.
 
 #### Project dashboards
 
@@ -598,6 +600,74 @@ Each one must be listed by name in the Role, so tell infra which you want.
   expose every project's Application to every project. Name yours and it works.
 - **Read-only.** You can watch a sync; you cannot start or stop one. If you need
   to force a sync, ask infra — [argocd.md](argocd.md) has the procedure.
+
+## Logs
+
+Everything your containers write to **stdout and stderr** is collected
+automatically. There is nothing to install or configure.
+
+### What is collected
+
+- **stdout and stderr of every container** in your namespaces, within seconds.
+  Files written inside the container are not collected: log to stdout.
+- **Kubernetes events** for your namespaces: restarts, OOM kills, failed image
+  pulls, failing probes, pods that cannot be scheduled.
+- **One line is one entry.** A multi-line stack trace arrives as several
+  entries. Log structured lines (JSON, one object per line) if you want to find
+  an error as a whole.
+- **Kept for 31 days**, then deleted. A record you need for longer, such as an
+  audit trail, belongs in your database.
+- **Collection stops once a pod has finished**, so the last lines of a very short
+  Job can be missing. `kubectl logs` still shows them while the pod exists.
+
+Each line carries these labels:
+
+| Label | Value |
+|---|---|
+| `namespace` | e.g. `proj-wsj27-prod` |
+| `container_name` | the container's name in the pod spec |
+| `pod_name` | the pod |
+| `app_name` | the pod's `app.kubernetes.io/name` label, if it has one |
+
+### Reading them in Grafana
+
+Sign in at `https://grafana.infra.ws.scouterna.net` ([Grafana](#grafana-metrics-and-logs)
+above) and open **Dashboards → Logs**:
+
+1. Pick your **namespace**.
+2. Narrow by **container** or **pod** if you like. Both default to all.
+3. Type in **Search** to keep only lines containing that text. Case does not
+   matter, and the text is matched as it is, not as a pattern.
+4. Set the time range at the top right. The dashboard does not refresh by
+   itself; use the refresh button.
+
+The bars at the top count lines per container, so a spike shows where to look.
+Click a line to see its labels. The **Kubernetes events** panel at the bottom
+shows the namespace's events, without the container, pod and search filters.
+
+Viewers cannot open Explore, so there are no free-form queries. For more, such
+as filtering on a JSON field or counting errors over time, add a logs panel to
+your own dashboard ([Project dashboards](#project-dashboards)). Use the `loki`
+datasource uid and fix the query to your namespace:
+
+```
+{namespace="proj-<name>-prod", container_name="api"} | json | level="error"
+```
+
+`kubectl logs` still works for running pods, and `kubectl logs --previous` shows
+the container before its last restart.
+
+### Who can read them
+
+**Every member of the Scouterna GitHub organization can read every namespace's
+logs, yours included.** The namespace list in the Logs dashboard is not limited
+to your project. So never log passwords, tokens, session cookies, connection
+strings or personal data. Watch request logging in particular: a token in a
+URL's query string lands in the log as it is. Per-project isolation is planned
+([#68](https://github.com/Scouterna/azure-webservices/issues/68)).
+
+Keep debug-level logging to dev. Every line is stored for 31 days, in storage
+all projects share.
 
 ## Secrets
 
