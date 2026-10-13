@@ -364,7 +364,8 @@ As of the initial build:
 >   0.x CRDs needs the old CRDs removed first (helm won't adopt un-owned CRDs). A
 >   fresh install is clean.
 > - **Traefik v39 → v41**: the chart's top-level `logs:` key became `log:` (level
->   moved directly under it) and access logs are now a separate `accessLog:` key.
+>   moved directly under it) and access logs are now a separate `accessLog:` key,
+>   off unless `accessLog.enabled: true`.
 
 ---
 
