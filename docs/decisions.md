@@ -40,6 +40,7 @@ say why rather than deleting it.
 | [28](#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed) | Onboarding needs no Azure account: shared project credentials are sealed | current |
 | [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
 | [30](#30-files-shared-volumes-are-backed-up-by-file-copy) | `files-shared` volumes are backed up by file copy | current, amends 23 |
+| [31](#31-commit-titles-are-conventional-commits-checked-on-the-pr-title) | Commit titles are Conventional Commits, checked on the PR title | current |
 
 ---
 
@@ -2174,3 +2175,43 @@ managed identity. Without the label, those pods have no credential.
   same container already holds every backed-up `Secret`, readable to the same
   people. The default is kept on purpose, so that a rebuilt cluster can read the
   repository without a separately preserved key.
+
+## 31. Commit titles are Conventional Commits, checked on the PR title
+
+**Current.** Every commit subject on `main` is `type(scope): subject`, with the
+types listed in `CLAUDE.md` ("Commit titles"). The
+[`commit-title`](../.github/workflows/commit-title.yml) workflow runs
+[`scripts/check-commit-title.sh`](../scripts/check-commit-title.sh) on the PR
+title, and again on the subjects of every push to `main`.
+
+**Why.** `main` is the change log of a live cluster. The type makes it skimmable
+during an incident ("what `fix`ed or `feat`ured near Velero last week?"). It also
+separates changes to what ArgoCD applies from documentation and CI. Plain
+sentences were consistent in wording, but nothing marked the kind of change, and
+a push straight to `main` carried no PR number and no review.
+
+**Why the PR title.** Merges are squash-only with `PR_TITLE` as the subject, so
+the title is the only part that reaches `main`. The workflow also runs on
+`edited`, so fixing a title re-runs the check without a new push.
+
+**Rejected:**
+
+- *Linting every commit on the branch.* The squash discards those commits. It
+  would also reject the `Merge branch 'main'` commits that branches use to catch
+  up, since force-pushing dismisses approvals.
+- *A ruleset commit-message rule.* It would live only in GitHub settings,
+  invisible in the repo. The `webservices-infra` bypass, the path that the
+  unchecked commits took, skips it anyway.
+- *A local `commit-msg` hook.* Hooks are opt-in here, and branch commits do not
+  reach `main`.
+- *A fixed list of scopes.* Every new service and project would need an edit to
+  the list. A free lowercase scope is enough to filter by.
+
+**Not solved.**
+
+- **The check is advisory** until `commit-title` is a required status check in
+  the `main` ruleset.
+- **A push straight to `main` is only flagged afterwards.** The push run goes
+  red, but the commit is already live. Only removing the bypass prevents it.
+- **Earlier history is not rewritten.** Commits before this entry use plain
+  sentences.

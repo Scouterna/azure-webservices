@@ -1,0 +1,25 @@
+name: commit-title
+
+# Separate from checks.yml so that editing a PR title re-runs only this check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  commit-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The squash merge uses the PR title as the commit subject on main.
+      # Passed through env, never ${{ }} in run: — the title is attacker-controlled.
+      - name: PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-commit-title.sh "$TITLE"
+      # A push straight to main skips the PR check; this flags it after the fact.
+      - name: Pushed commits are Conventional Commits
+        if: github.event_name == 'push'
+        run: jq -r '.commits[].message | split("\n")[0]' "$GITHUB_EVENT_PATH" | scripts/check-commit-title.sh

@@ -96,6 +96,10 @@ and every push to `main`:
 - **rule-counts** — rule counts written in prose in the docs match the
   platform-health alert rules
 
+[`.github/workflows/commit-title.yml`](.github/workflows/commit-title.yml)
+checks that the PR title is a Conventional Commit (see *Commit titles* below),
+and flags a push straight to `main` whose subject is not.
+
 > **The trap:** `main` now carries the live install's *filled-in* values, so CI
 > checks `--expect-filled`. But the opt-in pre-commit hook
 > (`scripts/install-hooks.sh`) checks the opposite direction,
@@ -116,6 +120,7 @@ project board. The style follows the other Scouterna repos (WSJ27):
 - **Every issue has a type**: `Feature`, `Bug` or `Task`. These are org-level
   issue types, not labels: `gh issue create --type Feature`.
 - **The title is a plain sentence** naming the need, with no `feat:` prefix.
+  (PR titles do take one; see *Commit titles*.)
 - **The body uses fixed headings**, and an optional section with nothing to say
   is left as `_No response_`:
   - Feature: `### Problem`, `### Who is this for?`, `### Proposal`,
@@ -149,6 +154,29 @@ rule.
 **Pointers into `docs/decisions.md` are by entry number**, written as
 "decisions.md entry N", and CI enforces that they resolve. If you renumber an
 entry, CI will find the dangling pointers — do not hand-hunt them.
+
+**Commit titles are [Conventional Commits](https://www.conventionalcommits.org/).**
+`main` is squash-merged with the PR title as the commit subject, so the **PR
+title** is what CI checks and what lands; branch commits are not checked.
+Format: `type(scope): subject`, e.g. `fix(traefik): turn on access logs`.
+
+| Type | When |
+|---|---|
+| `feat` | something new for projects or the platform: a service, a dashboard, onboarding a project |
+| `fix` | something live was wrong: broken config, a false alert, a wrong doc claim that misled |
+| `perf` | faster or cheaper, nothing was broken |
+| `docs` | only `docs/`, `README.md`, `CLAUDE.md` |
+| `ci` | `.github/` and the `scripts/check-*` CI checks |
+| `refactor` | restructure with no change to what ArgoCD applies |
+| `chore` | upkeep: version bumps, renames, housekeeping |
+| `revert` | undo an earlier commit (GitHub's own `Revert "..."` title is also accepted) |
+
+The scope is optional and lowercase: the service directory under
+`k8s/infra-manifest/` or the project namespace (`velero`, `proj-wsj27`). Leave it
+out when a change spans several. `!` after it (`feat(dex)!:`) marks a change
+that projects must act on. The subject stays as before, an imperative plain
+sentence, starting lowercase. Check locally with `scripts/check-commit-title.sh
+"<title>"`. Rationale: decisions.md entry 31.
 
 **Naming says the job, not the product.** The Loki/Thanos object store is
 `telemetry-store`; it happens to run MinIO. The name "MinIO" is reserved for a
