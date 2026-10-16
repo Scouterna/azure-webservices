@@ -42,3 +42,6 @@ environments:
   - name: staging
     sourcePath: k8s/staging
     automated: true
+    # Syncs every commit but keeps hand edits until the next one, so the team
+    # can scale staging down. Staging gates prod deploys; it is not for testing.
+    selfHeal: false
