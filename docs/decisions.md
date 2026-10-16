@@ -844,6 +844,21 @@ That case belongs to `PrometheusRuleGroupExpensive`, and reaching down to 17 her
 would put the threshold under the level a person reaches just by looking at
 Prometheus.
 
+**Changed 2026-10-12: a 2-hour window, not a 2-hour `for:`.** In round five
+(below) the telemetry store thrashed in bursts of 50-200 MB/s with near-idle gaps
+between them. The 15-minute rate dipped under 50 between bursts, so the rule went
+pending and reset all day, while `NodeDiskIOSaturation` fired after six hours.
+Averaging over the window instead adds the bursts up. Sampled on that day, the
+2h rate read 45 MB/s at 07:30Z, 54-61 from 08:00 to 12:00, and 88 by 14:00:
+`> 40e6` with `for: 30m` fires around 08:00, and on round four's flat 200 MB/s
+after about an hour instead of 2h15m.
+
+The cost is the margin against someone looking. A 45-minute session at the
+122 MB/s above would lift the 2h average to about 46. That figure predates the
+Prometheus memory fix and entry 25's routing of long ranges to Thanos, after which
+12h and 2d dashboards read nothing from disk, so it is likely stale.
+CALIBRATION PENDING: replace this sentence with measured figures before merge.
+
 **The obvious memory alert does not work, and was not added.** Working set over
 limit read **0.83** during the thrash, nowhere near the >0.95 such a rule needs,
 because refaulted cache counts as `inactive_file` and working set excludes it.
@@ -908,8 +923,9 @@ GB for cache, roughly two days of blocks; longer ranges still read from disk.
 Node memory requests go from 36% to 42%.
 
 **It stays unalerted, deliberately.** An episode lasts as long as a dashboard
-stays open, so it satisfies neither `for: 2h` on `ContainerDiskReadSustained` or
-`PrometheusRuleGroupExpensive`, nor `NodeDiskIOSaturation`'s 30 minutes. That is
+stays open, so it satisfies neither `PrometheusRuleGroupExpensive`'s `for: 2h`
+nor `NodeDiskIOSaturation`'s 30 minutes. `ContainerDiskReadSustained` now averages
+over 2h, which a long session could reach (see its section above). That is
 the intended trade — nobody is paged because someone is looking — so the fix is to
 make looking cheap, not to alert on it.
 
