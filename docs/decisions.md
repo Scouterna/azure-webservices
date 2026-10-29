@@ -1192,8 +1192,9 @@ would not co-locate them. Re-read the live mapping with
 
 ## 16. Node-image upgrades stay automatic, and the shared Postgres has no PDB
 
-**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, and
-`enablePDB: false` on the shared CloudNativePG cluster.
+**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, starting
+only in a weekly window (Tuesday 03:00–07:00 UTC), and `enablePDB: false` on the
+shared CloudNativePG cluster.
 
 **Why automatic, having been burned by it.** On 2026-08-24 an automatic
 node-image upgrade left the test cluster's pool in `provisioningState: Failed`,
@@ -1203,6 +1204,28 @@ node images ship roughly weekly carrying OS CVE fixes, and a manual step that is
 forgotten is worse than an automatic one that occasionally disrupts. **The right
 response was to make the disruption survivable, not to move it into a runbook
 nobody runs.**
+
+**Why a window, once it was survivable.** The first unattended upgrade on the
+live cluster started at 07:05 UTC on a Thursday (2026-10-29). With one node,
+AKS's surge upgrade moves every pod **twice**, onto a temporary surge node and
+then back onto the reimaged one. Each move is a full outage, because every
+workload is a single replica. That morning it took 16 minutes in two parts:
+Postgres was down twice, for about 3 and 5 minutes, and Keycloak and the apps
+that need it crash-looped until it returned. Everything recovered unattended, so
+the fixes below held. What was wrong was the hour, now that ScoutID's production
+IdP runs here. `aksManagedNodeOSUpgradeSchedule` and
+`aksManagedAutoUpgradeSchedule` now let both channels start only early on
+Tuesday mornings, from 03:00 UTC for 4 hours (AKS's minimum). That is after the
+nightly backups, which start at 02:00 and 02:30 UTC and finish within minutes. An
+upgrade that starts inside the window runs to completion even past its end. A
+late-evening window was rejected because that is when volunteers work.
+
+This is still automatic: no one has to be awake for it, and it is not a slot for
+people to work in. Both channels share one window so there is only one night to
+know about. The window is best-effort. AKS can still break it for urgent
+maintenance, and the platform-initiated upgrade of an out-of-support minor
+ignores it, which is one more reason to keep the minor supported
+([maintenance.md](maintenance.md)).
 
 **Why the drain wedged, and why the PDB goes.** CNPG creates a
 `PodDisruptionBudget` selecting `cnpg.io/instanceRole: primary` — it protects
