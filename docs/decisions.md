@@ -870,11 +870,18 @@ Averaging over the window instead adds the bursts up. Sampled on that day, the
 `> 40e6` with `for: 30m` fires around 08:00, and on round four's flat 200 MB/s
 after about an hour instead of 2h15m.
 
-The cost is the margin against someone looking. A 45-minute session at the
-122 MB/s above would lift the 2h average to about 46. That figure predates the
-Prometheus memory fix and entry 25's routing of long ranges to Thanos, after which
-12h and 2d dashboards read nothing from disk, so it is likely stale.
-CALIBRATION PENDING: replace this sentence with measured figures before merge.
+The cost is the margin against someone looking, measured 2026-10-30. With nobody
+looking, no container's 2h average went above **4.6 MB/s** in the 15 days before
+(1.1-2.4 on a normal day). A deliberate 15-minute Grafana session read **3.5 GB**
+from Prometheus in five minutes at 12h, and **45.5 GB** in nine minutes at 7d,
+about 84 MB/s: **6.8 MB/s** on the 2h average. 12h cannot reach 40 even if left
+open. A 7d dashboard left open reaches it after about an hour and fires half an
+hour later. That 7d cost came from the ten dashboards in this repo, which had the
+Prometheus datasource pinned and so read all 84 blocks from disk instead of going
+through Thanos (entry 25). Sweeping the rule's expression over those 15 days, in
+6h chunks, peaked at 121 MB/s for two minutes, about 2 MB/s on the 2h average.
+The 2h window costs about 0.1 s per evaluation against 1.3 ms for the 15-minute
+one, 0.03% of the five-minute group interval.
 
 **The obvious memory alert does not work, and was not added.** Working set over
 limit read **0.83** during the thrash, nowhere near the >0.95 such a rule needs,
