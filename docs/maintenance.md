@@ -177,7 +177,9 @@ and the API server still returns `401` is there a real fault to chase
 surge node, then back onto the reimaged node when the surge node is deleted,
 about 10 minutes later. Expect two outages of a few minutes each. Apps that need
 Postgres or Keycloak crash-loop until those are back, then recover on their own;
-on 2026-10-29 it took 16 minutes from start to finish. During the drain,
+on 2026-10-29 it took 16 minutes from start to finish. `PostgresDown` stays
+quiet through this and fires only if Postgres is still down 10 minutes after
+monitoring itself is back. During the drain,
 `Eviction blocked ... (usually a pdb)` warnings for coredns, konnectivity-agent
 and metrics-server are normal and clear once their replacements are up. To check
 that the window is in place:
