@@ -20,7 +20,7 @@ data:
           {
             "name": "namespace",
             "type": "query",
-            "datasource": "Prometheus",
+            "datasource": null,
             "query": "label_values(kube_pod_info, namespace)",
             "includeAll": true,
             "multi": true,

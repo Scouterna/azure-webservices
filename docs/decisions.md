@@ -1960,11 +1960,17 @@ what the sidecar still serves.
   queries go to the store gateway. Two days read from Prometheus was measured fast
   once entry 11 gave it page cache, and two days also leaves the bucket that much
   margin if uploads stall.
-- **Thanos is Grafana's default datasource.** The bundled dashboards pick their
-  datasource through a variable that defaults to the default, so all of them move.
-  The chart's own `Prometheus` datasource stays for dashboards that pin its uid,
+- **Thanos is Grafana's default datasource.** Dashboards pick their datasource
+  through a variable that defaults to the default, so all of them move. The
+  chart's own `Prometheus` datasource stays for dashboards that pin its uid,
   and selecting it for a long range brings the old behaviour back — bounded by
   entry 11's one-minute guards.
+
+  *Corrected 2026-10-30:* only the chart's dashboards moved. The ones vendored
+  into this repo had `Prometheus` saved as their variable's value, and kept
+  using it. In a measured 7d session that read about 5 GB a minute from
+  Prometheus's disk, its direct queries taking ~36 s each (entry 11). They now
+  save `default` too.
 - `thanos-query --query.auto-downsampling`. The bucket keeps raw samples for 10
   days and the 5m and 1h tiers for longer (entry 19); Thanos reads only raw data
   unless a query allows a coarser resolution. This is the one setting whose effect
