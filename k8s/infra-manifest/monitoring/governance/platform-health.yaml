@@ -98,10 +98,31 @@ spec:
               The database is up; its backups are not. Point-in-time recovery is
               degraded for as long as this persists — see docs/maintenance.md.
 
+        - alert: PostgresDown
+          # absent(... == 1), not == 0: a dead process reads 0, but a pod that is
+          # gone or Pending has no series at all. for: 10m rides out the weekly
+          # node-upgrade restart. A lost scrape fires it too, which is also when
+          # the WAL rule above goes blind. decisions.md entry 11.
+          expr: |
+            absent(cnpg_collector_up{namespace="postgres", cluster="shared"} == 1)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Shared Postgres has been down for over 10 minutes"
+            description: >-
+              No instance of the shared Postgres cluster reports up, so every
+              project database is unavailable. A node upgrade restarts it for a
+              few minutes and it recovers on its own; 10 minutes means it has not.
+              Check `kubectl -n postgres get cluster,pods` and the pod's events.
+              If Postgres is in fact serving, the postgres-shared PodMonitor has
+              stopped scraping it, and PostgresWALArchivingFailing is blind too.
+
         # --- Absence companions -------------------------------------------
-        # Every rule above needs its series to EXIST. If the exporter stops, the
-        # expression returns nothing and the alert cannot fire — silent exactly
-        # when it matters. These two say "the rule above has gone blind".
+        # Every rule above but PostgresDown needs its series to EXIST. If the
+        # exporter stops, the expression returns nothing and the alert cannot
+        # fire — silent exactly when it matters. These two say "the rule above
+        # has gone blind".
 
         - alert: VeleroBackupMetricsAbsent
           # No backup metric at all: Velero is gone, or nothing has succeeded

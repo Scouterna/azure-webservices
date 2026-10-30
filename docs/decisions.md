@@ -517,7 +517,7 @@ not error — it would just get noisy.
 
 A receiver alone would have delivered 155 generic Kubernetes alerts and still
 nothing about this platform's own controls, all of which fail quietly:
-`governance/platform-health.yaml` adds six rules for exactly those.
+`governance/platform-health.yaml` adds seven rules for exactly those.
 
 | Alert | The quiet failure it catches |
 |---|---|
@@ -526,6 +526,7 @@ nothing about this platform's own controls, all of which fail quietly:
 | `VeleroBackupValidationFailing` | Backups *rejected before they start* — a different counter, so the rule above cannot see it |
 | `VeleroNoRecentBackup` | Worse — not failing, just not running |
 | `PostgresWALArchivingFailing` | The database serves queries perfectly while archiving nothing |
+| `PostgresDown` | The shared database has not come back, and nothing pages: ArgoCD stays Synced, and a short weekly restart is expected ([entry 16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb)) |
 | `ArgoCDAppNotSynced` | GitOps stopped converging, so every control in this repo quietly stops being enforced |
 
 **A rejected backup is not a failed backup.** Velero counts a `FailedValidation`
@@ -543,6 +544,21 @@ sibling.
 from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, not
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
+
+**`PostgresDown` alerts on absence, and waits 10 minutes.** It was agreed when
+the Postgres PDB went (entry 16): with upgrades automatic, the shared database
+restarts about weekly, and nothing said so if it did not come back. Down has two
+shapes. A dead Postgres process inside a running pod reports
+`cnpg_collector_up 0`, but a pod that is gone or stuck `Pending` (a disk that will
+not attach) has no scrape target, so there is no series at all. A `== 0` rule
+misses the second case, so the rule is `absent(cnpg_collector_up{…} == 1)`. A
+lost scrape fires it too, which is exactly when `PostgresWALArchivingFailing` goes
+blind. `for: 10m`
+rides out a node upgrade, which takes Postgres down for about 5 minutes twice
+(2026-10-29). At the group's 5-minute interval it fires 10–15 minutes into an
+outage. **It cannot see a whole-node outage**: Prometheus and Alertmanager run on
+the same node and go down with everything else. It catches the database not
+coming back once monitoring has.
 
 **Every Velero rule is scoped to `schedule!=""`.** Velero exports its backup
 metrics once per schedule *and* once with an empty `schedule` label, covering
