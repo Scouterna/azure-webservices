@@ -92,7 +92,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
       }
     }
 
-    // Keep the cluster patched automatically.
+    // Keep the cluster patched automatically, in upgradeWindow (below).
     autoUpgradeProfile: {
       upgradeChannel: 'patch'
       nodeOSUpgradeChannel: 'NodeImage'
@@ -156,6 +156,37 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
         }
       }
     ]
+  }
+}
+
+// Both upgrade channels start only in this weekly early-morning slot: with one
+// node, every upgrade is two short full outages. Tuesday 03:00 UTC for 4h (AKS's
+// minimum), after the 02:00–02:30 UTC backups. docs/decisions.md entry 16.
+var upgradeWindow = {
+  schedule: {
+    weekly: {
+      intervalWeeks: 1
+      dayOfWeek: 'Tuesday'
+    }
+  }
+  durationHours: 4
+  startTime: '03:00'
+  utcOffset: '+00:00'
+}
+
+resource nodeOSUpgradeWindow 'Microsoft.ContainerService/managedClusters/maintenanceConfigurations@2026-03-01' = {
+  parent: aks
+  name: 'aksManagedNodeOSUpgradeSchedule'
+  properties: {
+    maintenanceWindow: upgradeWindow
+  }
+}
+
+resource patchUpgradeWindow 'Microsoft.ContainerService/managedClusters/maintenanceConfigurations@2026-03-01' = {
+  parent: aks
+  name: 'aksManagedAutoUpgradeSchedule'
+  properties: {
+    maintenanceWindow: upgradeWindow
   }
 }
 

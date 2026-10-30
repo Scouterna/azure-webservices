@@ -41,9 +41,6 @@ revision: main
 #                     DISCARDS those edits (see docs/argocd.md).
 # `selfHeal` optional, default true. false with automated: true syncs on each
 #             commit or new image but leaves hand edits alone in between.
-#
-# Staging is left out until k8s/staging has manifests: a missing path sits in
-# ComparisonError and fires ArgoCDAppNotSynced.
 environments:
   # Image Updater rolls it to the newest :dev digest — infra-manifest/
   # argocd-image-updater/registrations/proj-wsj27.yaml.
@@ -51,6 +48,9 @@ environments:
     sourcePath: k8s/dev
     automated: true
     selfHeal: false
+  - name: staging
+    sourcePath: k8s/staging
+    automated: true
   - name: prod
     sourcePath: k8s/prod
     automated: true

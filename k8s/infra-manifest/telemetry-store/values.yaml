@@ -12,6 +12,10 @@
 # Sized from measured J26 rates — docs/decisions.md entry 19.
 mode: standalone
 replicas: 1
+# Chart default surges a 2nd server onto the same RWO volume before the old
+# one stops. One server per drive.
+deploymentUpdate:
+  type: Recreate
 
 # MinIO Inc. stopped publishing images and deleted quay.io/minio/*; the chart's
 # default no longer pulls. PGSTY Silo is the maintained community fork: same
@@ -35,12 +39,14 @@ persistence:
   storageClass: disk-standardssd
   size: 64Gi          # E6 tier — do not use non-tier sizes
 
+# At 1Gi the cgroup sat full and the server re-read its own binary off the OS
+# disk (~1.4 TB/7h). docs/decisions.md entry 11, "Round five".
 resources:
   requests:
     cpu: 100m
-    memory: 512Mi
-  limits:
     memory: 1Gi
+  limits:
+    memory: 2Gi
 
 # Root credentials come from a pre-created Secret, materialized from Key Vault
 # by ESO (k8s/infra-manifest/external-secrets/telemetry-store-secrets.yaml).

@@ -1,0 +1,88 @@
+# Ingress to `monitoring`: its own pods, plus the three paths in from outside.
+# Loki runs without auth and Alertmanager accepts silences from anyone who can
+# reach it, so a project pod must not. docs/security.md §5.
+# Kubelet probes are unaffected (Cilium allow-localhost resolves to `always`).
+# Verify enforcement, not sync: install.md §11 ("Monitoring is closed").
+#
+# Selecting every pod makes the namespace ingress-isolated; the policies below add up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-same-namespace
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Traefik → Grafana, for the grafana.<host> Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-from-traefik
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/instance: kps
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# Traefik → cert-manager's HTTP-01 solver pods, which exist only while
+# grafana-tls renews. Without this, renewal fails ~60 days later, silently.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-solver-from-traefik
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - protocol: TCP
+          port: 8089
+---
+# API server → prometheus-operator admission webhook. On AKS the call arrives
+# via konnectivity-agent in kube-system; the whole namespace is allowed so an
+# AKS relabel cannot break it. failurePolicy is Ignore, so a block would only
+# skip PrometheusRule validation, silently, after a 10s timeout per apply.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: operator-webhook-from-apiserver
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: kube-prometheus-stack-operator
+      release: kps
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 10250

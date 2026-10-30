@@ -20,6 +20,7 @@ does not depend on grafana.com being reachable.
 | `thanos-query.json` / `-store` / `-compact` | [thanos repo][thanos] | |
 | `loki.json` | [loki repo][loki] `loki-chunks` | **Adapted**, see below |
 | `namespace-usage.json` | hand-written | Ours, not vendored — same flow as the rest |
+| `logs.json` | hand-written | Where projects read their logs (Viewers cannot open Explore). Labels come from `alloy-values.yaml` |
 
 [eso]: https://github.com/external-secrets/external-secrets/blob/main/docs/snippets/dashboard.json
 [minio]: https://github.com/minio/minio/blob/master/docs/metrics/prometheus/grafana/minio-dashboard.json

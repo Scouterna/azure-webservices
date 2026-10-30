@@ -1,5 +1,6 @@
 # Wave 4 — governance-by-observation: the soft-threshold PrometheusRule and the
-# per-namespace Grafana dashboard (a labeled ConfigMap the Grafana sidecar loads).
+# per-namespace Grafana dashboard (a labeled ConfigMap the Grafana sidecar loads),
+# plus the monitoring namespace's ingress NetworkPolicies.
 # Wave 4 so it lands after monitoring (wave 2) exists.
 apiVersion: argoproj.io/v1alpha1
 kind: Application

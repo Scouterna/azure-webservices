@@ -100,8 +100,9 @@ Thanos, Headlamp.
 ## AKS upgrades
 
 - **Patches** (`1.36.x`) and **node images**: automatic, via the `patch` and
-  `NodeImage` channels in `infra/aks.bicep`. Nothing to do — deliberately, see
-  below.
+  `NodeImage` channels in `infra/aks.bicep`. They start only in the weekly
+  window, **Tuesday 03:00–07:00 UTC** (`upgradeWindow`). Nothing to do —
+  deliberately, see below.
 - **Minors** (`1.36 → 1.37`): manual. Bump `kubernetesVersion` in
   `infra/aks.bicep` + the param files, `az deployment group create` (or
   `az aks upgrade`). Do it before AKS drops support for the running minor
@@ -171,6 +172,21 @@ Compare with the `kid` in the token's JWT header. A mismatch means the token
 predates a key rotation — log in again, nothing is wrong. Only if they **match**
 and the API server still returns `401` is there a real fault to chase
 ([decisions.md](decisions.md) entry 16).
+
+**What an upgrade looks like on one node.** Every pod moves twice: onto a
+surge node, then back onto the reimaged node when the surge node is deleted,
+about 10 minutes later. Expect two outages of a few minutes each. Apps that need
+Postgres or Keycloak crash-loop until those are back, then recover on their own;
+on 2026-10-29 it took 16 minutes from start to finish. `PostgresDown` stays
+quiet through this and fires only if Postgres is still down 10 minutes after
+monitoring itself is back. During the drain,
+`Eviction blocked ... (usually a pdb)` warnings for coredns, konnectivity-agent
+and metrics-server are normal and clear once their replacements are up. To check
+that the window is in place:
+
+```bash
+az aks maintenanceconfiguration list -g $RG --cluster-name $CLUSTER -o table
+```
 
 **Verifying after an upgrade.** Node images are checked with:
 
@@ -364,7 +380,8 @@ As of the initial build:
 >   0.x CRDs needs the old CRDs removed first (helm won't adopt un-owned CRDs). A
 >   fresh install is clean.
 > - **Traefik v39 → v41**: the chart's top-level `logs:` key became `log:` (level
->   moved directly under it) and access logs are now a separate `accessLog:` key.
+>   moved directly under it) and access logs are now a separate `accessLog:` key,
+>   off unless `accessLog.enabled: true`.
 
 ---
 

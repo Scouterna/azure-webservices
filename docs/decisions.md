@@ -40,6 +40,7 @@ say why rather than deleting it.
 | [28](#28-onboarding-needs-no-azure-account-shared-project-credentials-are-sealed) | Onboarding needs no Azure account: shared project credentials are sealed | current |
 | [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
 | [30](#30-files-shared-volumes-are-backed-up-by-file-copy) | `files-shared` volumes are backed up by file copy | current, amends 23 |
+| [31](#31-commit-titles-are-conventional-commits-checked-on-the-pr-title) | Commit titles are Conventional Commits, checked on the PR title | current |
 
 ---
 
@@ -516,7 +517,7 @@ not error — it would just get noisy.
 
 A receiver alone would have delivered 155 generic Kubernetes alerts and still
 nothing about this platform's own controls, all of which fail quietly:
-`governance/platform-health.yaml` adds six rules for exactly those.
+`governance/platform-health.yaml` adds seven rules for exactly those.
 
 | Alert | The quiet failure it catches |
 |---|---|
@@ -525,6 +526,7 @@ nothing about this platform's own controls, all of which fail quietly:
 | `VeleroBackupValidationFailing` | Backups *rejected before they start* — a different counter, so the rule above cannot see it |
 | `VeleroNoRecentBackup` | Worse — not failing, just not running |
 | `PostgresWALArchivingFailing` | The database serves queries perfectly while archiving nothing |
+| `PostgresDown` | The shared database has not come back, and nothing pages: ArgoCD stays Synced, and a short weekly restart is expected ([entry 16](#16-node-image-upgrades-stay-automatic-and-the-shared-postgres-has-no-pdb)) |
 | `ArgoCDAppNotSynced` | GitOps stopped converging, so every control in this repo quietly stops being enforced |
 
 **A rejected backup is not a failed backup.** Velero counts a `FailedValidation`
@@ -542,6 +544,21 @@ sibling.
 from memory. That caught one: the archiver metric is `cnpg_pg_stat_archiver_*`, not
 `cnpg_collector_pg_stat_archiver_*` — a plausible-looking name that would never
 match, giving a rule that looks healthy and never fires.
+
+**`PostgresDown` alerts on absence, and waits 10 minutes.** It was agreed when
+the Postgres PDB went (entry 16): with upgrades automatic, the shared database
+restarts about weekly, and nothing said so if it did not come back. Down has two
+shapes. A dead Postgres process inside a running pod reports
+`cnpg_collector_up 0`, but a pod that is gone or stuck `Pending` (a disk that will
+not attach) has no scrape target, so there is no series at all. A `== 0` rule
+misses the second case, so the rule is `absent(cnpg_collector_up{…} == 1)`. A
+lost scrape fires it too, which is exactly when `PostgresWALArchivingFailing` goes
+blind. `for: 10m`
+rides out a node upgrade, which takes Postgres down for about 5 minutes twice
+(2026-10-29). At the group's 5-minute interval it fires 10–15 minutes into an
+outage. **It cannot see a whole-node outage**: Prometheus and Alertmanager run on
+the same node and go down with everything else. It catches the database not
+coming back once monitoring has.
 
 **Every Velero rule is scoped to `schedule!=""`.** Velero exports its backup
 metrics once per schedule *and* once with an empty `schedule` label, covering
@@ -965,6 +982,63 @@ take milliseconds when the disk is not contended. Neither guard makes seven days
 fast. Reading long ranges from the bucket instead is entry 25: through Thanos they
 take about a second, once the sidecar stops serving Prometheus's own copy of them.
 
+## Round five: the telemetry store
+
+**On 2026-10-12 `NodeDiskIOSaturation` fired on `nvme0n1`, the OS disk, at
+12:31Z.** It had been pending on and off since 06:05Z, with queue depth spiking
+to 50-108 roughly every hour. Rule groups were cheap (worst 0.027 s), so the
+rule engine was out at once.
+
+The reader was the telemetry store's server container: **1,386 GB off the OS
+disk in seven hours**, against 1,418 GB for the whole device (blkio and
+node-exporter agree). The day before it read 11 GB. Its data lives on its own
+PVC, so OS-disk reads can only be its image.
+
+**Its own executable, paged back in from the image.** Process `read_bytes` went
+from about 3 to 50-90 MB/s at onset while `rchar` stayed flat at 0.4 MB/s, and
+major faults went from zero to 1-4 a second. The IO did not come through
+`read()`; it came through page faults on file-backed mappings. S3 request rates,
+scanner rate, goroutines and resident memory were all flat across the onset, so
+no client asked for more.
+
+**Kernel slab took half the limit.** The cgroup's `memory.stat`, read at 15:13Z:
+
+| | |
+|---|---|
+| `memory.max` vs `memory.current` | 1 GiB, at **99.98%** |
+| `anon` | 416 MB |
+| `slab_reclaimable` | **528 MB** |
+| `file` / of which `file_mapped` | **125 MB / 13 MB** |
+| `memory.events` max vs `oom_kill` | 20,527 vs **0** |
+| objects in the store | ~175,000, growing ~8,000 a day |
+
+The slab is inodes and dentries for the store's on-disk tree, which grows with
+object count. It is reclaimable, but direct reclaim takes file pages first, so
+the binary's mapped pages were squeezed to 13 MB and kept being re-read.
+
+**Every byte read was a page it had already had.** Lifetime totals since the pod
+started on 2026-10-03: `workingset_refault_file` **3,392 GB**, process
+`read_bytes` **3,544 GB**, `rchar` 378 GB. Refaults are 96% of what it read
+from disk. The cliff is the same as round four's; only the thing evicted
+differs, the binary rather than data. By 14:28Z the bursts reached **204 MB/s**,
+the VM's uncached cap for all its disks combined.
+
+**`2Gi` limit, `1Gi` request.** The request covers what it already used at rest;
+the limit leaves about a gigabyte of headroom. At ~8,000 objects a day, slab
+growth will eat into it; `memory.stat` is the place to look when this recurs. Node memory requests go from 72% to
+76%.
+
+**The Deployment now uses `Recreate`.** The chart's default `RollingUpdate`
+(`maxSurge: 100%`, `maxUnavailable: 0`) starts the new server before stopping the
+old one, and on a single node an RWO volume lets both mount the same drive. The
+2026-09-25 image change dodged it only because the old pod was already failing
+to pull; a resource change like this one would not. Cost: Loki and Thanos lose the store for
+the seconds a restart takes, which they already tolerate.
+
+**`ContainerDiskReadSustained` went pending and never fired.** The reads came in
+bursts, so the 15-minute rate dropped below 50 MB/s between them and reset the
+2-hour `for:` each time. That is a gap in the rule, left for its own change.
+
 ## 12. GitOps is ArgoCD, not Flux
 
 **Settled.** Evaluated on 2026-08-12 and re-checked on 2026-08-22 against the
@@ -1151,8 +1225,9 @@ would not co-locate them. Re-read the live mapping with
 
 ## 16. Node-image upgrades stay automatic, and the shared Postgres has no PDB
 
-**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, and
-`enablePDB: false` on the shared CloudNativePG cluster.
+**Current.** `nodeOSUpgradeChannel: 'NodeImage'` in `infra/aks.bicep`, starting
+only in a weekly window (Tuesday 03:00–07:00 UTC), and `enablePDB: false` on the
+shared CloudNativePG cluster.
 
 **Why automatic, having been burned by it.** On 2026-08-24 an automatic
 node-image upgrade left the test cluster's pool in `provisioningState: Failed`,
@@ -1162,6 +1237,28 @@ node images ship roughly weekly carrying OS CVE fixes, and a manual step that is
 forgotten is worse than an automatic one that occasionally disrupts. **The right
 response was to make the disruption survivable, not to move it into a runbook
 nobody runs.**
+
+**Why a window, once it was survivable.** The first unattended upgrade on the
+live cluster started at 07:05 UTC on a Thursday (2026-10-29). With one node,
+AKS's surge upgrade moves every pod **twice**, onto a temporary surge node and
+then back onto the reimaged one. Each move is a full outage, because every
+workload is a single replica. That morning it took 16 minutes in two parts:
+Postgres was down twice, for about 3 and 5 minutes, and Keycloak and the apps
+that need it crash-looped until it returned. Everything recovered unattended, so
+the fixes below held. What was wrong was the hour, now that ScoutID's production
+IdP runs here. `aksManagedNodeOSUpgradeSchedule` and
+`aksManagedAutoUpgradeSchedule` now let both channels start only early on
+Tuesday mornings, from 03:00 UTC for 4 hours (AKS's minimum). That is after the
+nightly backups, which start at 02:00 and 02:30 UTC and finish within minutes. An
+upgrade that starts inside the window runs to completion even past its end. A
+late-evening window was rejected because that is when volunteers work.
+
+This is still automatic: no one has to be awake for it, and it is not a slot for
+people to work in. Both channels share one window so there is only one night to
+know about. The window is best-effort. AKS can still break it for urgent
+maintenance, and the platform-initiated upgrade of an out-of-support minor
+ignores it, which is one more reason to keep the minor supported
+([maintenance.md](maintenance.md)).
 
 **Why the drain wedged, and why the PDB goes.** CNPG creates a
 `PodDisruptionBudget` selecting `cnpg.io/instanceRole: primary` — it protects
@@ -2053,8 +2150,10 @@ that the policy never saw.
 
 **Not solved.**
 
-- **A folder is not access control.** Every Viewer sees every folder, and any
-  namespace's metrics through Explore (onboarding.md, Grafana). Per-team folder
+- **A folder is not access control.** Every Viewer sees every folder, and can
+  query any namespace's metrics and logs; a dashboard's queries are not checked
+  against the viewer. Explore is Editor-only, which narrows the UI, not the data
+  (onboarding.md, Grafana). Per-team folder
   permissions need GitHub team sync, a Grafana Enterprise feature.
 - **Dashboard `uid`s are global.** A project reusing an infra dashboard's uid
   can shadow it. The policy language has no JSON parser, so a naming rule in
@@ -2131,3 +2230,43 @@ managed identity. Without the label, those pods have no credential.
   same container already holds every backed-up `Secret`, readable to the same
   people. The default is kept on purpose, so that a rebuilt cluster can read the
   repository without a separately preserved key.
+
+## 31. Commit titles are Conventional Commits, checked on the PR title
+
+**Current.** Every commit subject on `main` is `type(scope): subject`, with the
+types listed in `CLAUDE.md` ("Commit titles"). The
+[`commit-title`](../.github/workflows/commit-title.yml) workflow runs
+[`scripts/check-commit-title.sh`](../scripts/check-commit-title.sh) on the PR
+title, and again on the subjects of every push to `main`.
+
+**Why.** `main` is the change log of a live cluster. The type makes it skimmable
+during an incident ("what `fix`ed or `feat`ured near Velero last week?"). It also
+separates changes to what ArgoCD applies from documentation and CI. Plain
+sentences were consistent in wording, but nothing marked the kind of change, and
+a push straight to `main` carried no PR number and no review.
+
+**Why the PR title.** Merges are squash-only with `PR_TITLE` as the subject, so
+the title is the only part that reaches `main`. The workflow also runs on
+`edited`, so fixing a title re-runs the check without a new push.
+
+**Rejected:**
+
+- *Linting every commit on the branch.* The squash discards those commits. It
+  would also reject the `Merge branch 'main'` commits that branches use to catch
+  up, since force-pushing dismisses approvals.
+- *A ruleset commit-message rule.* It would live only in GitHub settings,
+  invisible in the repo. The `webservices-infra` bypass, the path that the
+  unchecked commits took, skips it anyway.
+- *A local `commit-msg` hook.* Hooks are opt-in here, and branch commits do not
+  reach `main`.
+- *A fixed list of scopes.* Every new service and project would need an edit to
+  the list. A free lowercase scope is enough to filter by.
+
+**Not solved.**
+
+- **The check is advisory** until `commit-title` is a required status check in
+  the `main` ruleset.
+- **A push straight to `main` is only flagged afterwards.** The push run goes
+  red, but the commit is already live. Only removing the bypass prevents it.
+- **Earlier history is not rewritten.** Commits before this entry use plain
+  sentences.

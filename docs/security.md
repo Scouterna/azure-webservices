@@ -1,8 +1,8 @@
 # Namespace isolation
 
 Why the cluster stops a project namespace from reaching the node, the shared
-Key Vault and the telemetry store, and what the four controls that do it
-deliberately do *not* cover.
+Key Vault, the telemetry store and the monitoring stack, and what the five
+controls that do it deliberately do *not* cover.
 
 ## The problem these controls address
 
@@ -15,8 +15,8 @@ to all of it.
 
 Three paths led out of a namespace: two to the node (§1, §2, which close each
 other's gap and neither of which is sufficient alone), and one straight to the
-vault (§3) that neither of the first two touches. A fourth control (§4) closes
-one shared service that holds every namespace's data.
+vault (§3) that neither of the first two touches. Two more controls (§4, §5)
+close the shared services that hold every namespace's logs and metrics.
 
 ## 1. Egress to IMDS is denied
 
@@ -192,6 +192,42 @@ checks — worth re-checking if a chart upgrade adds them.
 
 **Verifying.** Synced does not mean enforced: [install.md](install.md) §11
 ("Telemetry store is closed").
+
+## 5. The monitoring stack accepts only its own traffic
+
+`k8s/infra-manifest/monitoring/governance/networkpolicy-ingress.yaml`
+
+§4 closes the store, not the services in front of it. Loki runs with
+`auth_enabled: false`, so anything that reaches its API reads every
+namespace's logs; Prometheus and Thanos answer any query; Alertmanager accepts
+silences from anyone. With no policy, a project pod could do all of that.
+
+**The policy.** Every pod in `monitoring` is ingress-isolated and accepts
+traffic from the rest of `monitoring`. Three paths come in from outside, each
+found by checking the cluster rather than assumed:
+
+| From | To | Why |
+|---|---|---|
+| `traefik` | Grafana, `3000` | the `grafana.<host>` Ingress |
+| `traefik` | cert-manager HTTP-01 solver pods, `8089` | `grafana-tls` renewal. The solver exists only during a renewal, so a missing rule breaks nothing until the certificate expires |
+| `kube-system` | prometheus-operator, `10250` | the admission webhook. On AKS the API server's call arrives through `konnectivity-agent`. `failurePolicy: Ignore` means a block would silently skip rule validation, not fail |
+
+Projects use Grafana through Traefik and its SSO login, as before.
+
+**What is deliberately not in the table.** Kubelet probes: Cilium's
+`allow-localhost` resolves to `always` in Kubernetes mode (confirmed on the
+running agent), so the node always reaches its own pods. The same rule admits
+host-network pods — node-exporter is one, and the policy does not select it.
+`kubectl port-forward` enters the pod's network namespace from the node and is
+unaffected; `kubectl proxy` to a monitoring Service goes through
+`konnectivity-agent` and is blocked except to the operator.
+
+**Why namespaces, not pod labels, on the source side.** Same reasoning as §4:
+`traefik` and `kube-system` hold no project workloads, and chart or AKS label
+changes on the source side should not silently break a path.
+
+**Verifying.** Synced does not mean enforced: [install.md](install.md) §11
+("Monitoring is closed").
 
 ## Known limits
 

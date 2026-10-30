@@ -36,9 +36,14 @@ revision: main
 #             false → ArgoCD reports drift but changes nothing until a deliberate
 #                     sync. Lets the project keep hand-editing; note a later sync
 #                     DISCARDS those edits (see docs/argocd.md).
-# Only staging exists in the repo so far. Add prod once k8s/prod exists: an
-# environment whose path is missing sits in ComparisonError.
 environments:
   - name: staging
     sourcePath: k8s/staging
     automated: true
+    # Syncs every commit but keeps hand edits until the next one, so the team
+    # can scale staging down. Staging gates prod deploys; it is not for testing.
+    selfHeal: false
+  # Manual sync: prod changes only when someone syncs it in ArgoCD.
+  - name: prod
+    sourcePath: k8s/prod
+    automated: false
