@@ -861,6 +861,28 @@ That case belongs to `PrometheusRuleGroupExpensive`, and reaching down to 17 her
 would put the threshold under the level a person reaches just by looking at
 Prometheus.
 
+**Changed 2026-10-12: a 2-hour window, not a 2-hour `for:`.** In round five
+(below) the telemetry store thrashed in bursts of 50-200 MB/s with near-idle gaps
+between them. The 15-minute rate dipped under 50 between bursts, so the rule went
+pending and reset all day, while `NodeDiskIOSaturation` fired after six hours.
+Averaging over the window instead adds the bursts up. Sampled on that day, the
+2h rate read 45 MB/s at 07:30Z, 54-61 from 08:00 to 12:00, and 88 by 14:00:
+`> 40e6` with `for: 30m` fires around 08:00, and on round four's flat 200 MB/s
+after about an hour instead of 2h15m.
+
+The cost is the margin against someone looking, measured 2026-10-30. With nobody
+looking, no container's 2h average went above **4.6 MB/s** in the 15 days before
+(1.1-2.4 on a normal day). A deliberate 15-minute Grafana session read **3.5 GB**
+from Prometheus in five minutes at 12h, and **45.5 GB** in nine minutes at 7d,
+about 84 MB/s: **6.8 MB/s** on the 2h average. 12h cannot reach 40 even if left
+open. A 7d dashboard left open reaches it after about an hour and fires half an
+hour later. That 7d cost came from the ten dashboards in this repo, which had the
+Prometheus datasource pinned and so read all 84 blocks from disk instead of going
+through Thanos (entry 25). Sweeping the rule's expression over those 15 days, in
+6h chunks, peaked at 121 MB/s for two minutes, about 2 MB/s on the 2h average.
+The 2h window costs about 0.1 s per evaluation against 1.3 ms for the 15-minute
+one, 0.03% of the five-minute group interval.
+
 **The obvious memory alert does not work, and was not added.** Working set over
 limit read **0.83** during the thrash, nowhere near the >0.95 such a rule needs,
 because refaulted cache counts as `inactive_file` and working set excludes it.
@@ -925,8 +947,9 @@ GB for cache, roughly two days of blocks; longer ranges still read from disk.
 Node memory requests go from 36% to 42%.
 
 **It stays unalerted, deliberately.** An episode lasts as long as a dashboard
-stays open, so it satisfies neither `for: 2h` on `ContainerDiskReadSustained` or
-`PrometheusRuleGroupExpensive`, nor `NodeDiskIOSaturation`'s 30 minutes. That is
+stays open, so it satisfies neither `PrometheusRuleGroupExpensive`'s `for: 2h`
+nor `NodeDiskIOSaturation`'s 30 minutes. `ContainerDiskReadSustained` now averages
+over 2h, which a long session could reach (see its section above). That is
 the intended trade — nobody is paged because someone is looking — so the fix is to
 make looking cheap, not to alert on it.
 
