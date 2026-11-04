@@ -1968,9 +1968,9 @@ what the sidecar still serves.
 
   *Corrected 2026-10-30:* only the chart's dashboards moved. The ones vendored
   into this repo had `Prometheus` saved as their variable's value, and kept
-  using it. In a measured 7d session that read about 5 GB a minute from
-  Prometheus's disk, its direct queries taking ~36 s each (entry 11). They now
-  save `default` too.
+  using it. In a measured 7d session they read about 5 GB a minute from
+  Prometheus's disk, each direct query taking ~36 s (entry 11). They now save
+  `default` too.
 - `thanos-query --query.auto-downsampling`. The bucket keeps raw samples for 10
   days and the 5m and 1h tiers for longer (entry 19); Thanos reads only raw data
   unless a query allows a coarser resolution. This is the one setting whose effect
