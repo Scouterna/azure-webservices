@@ -861,7 +861,7 @@ That case belongs to `PrometheusRuleGroupExpensive`, and reaching down to 17 her
 would put the threshold under the level a person reaches just by looking at
 Prometheus.
 
-**Changed 2026-10-12: a 2-hour window, not a 2-hour `for:`.** In round five
+**Changed 2026-11-04: a 2-hour window, not a 2-hour `for:`.** In round five
 (below) the telemetry store thrashed in bursts of 50-200 MB/s with near-idle gaps
 between them. The 15-minute rate dipped under 50 between bursts, so the rule went
 pending and reset all day, while `NodeDiskIOSaturation` fired after six hours.
@@ -876,12 +876,19 @@ looking, no container's 2h average went above **4.6 MB/s** in the 15 days before
 from Prometheus in five minutes at 12h, and **45.5 GB** in nine minutes at 7d,
 about 84 MB/s: **6.8 MB/s** on the 2h average. 12h cannot reach 40 even if left
 open. A 7d dashboard left open reaches it after about an hour and fires half an
-hour later. That 7d cost came from the ten dashboards in this repo, which had the
-Prometheus datasource pinned and so read all 84 blocks from disk instead of going
-through Thanos (entry 25). Sweeping the rule's expression over those 15 days, in
-6h chunks, peaked at 121 MB/s for two minutes, about 2 MB/s on the 2h average.
-The 2h window costs about 0.1 s per evaluation against 1.3 ms for the 15-minute
-one, 0.03% of the five-minute group interval.
+hour later. Sweeping the rule's expression over those 15 days, in 6h chunks,
+peaked at 121 MB/s for two minutes, about 2 MB/s on the 2h average. The 2h window
+costs about 0.1 s per evaluation against 1.3 ms for the 15-minute one, 0.03% of
+the five-minute group interval.
+
+**7d stays expensive through Thanos, and that is accepted.** Repeated 2026-11-04
+with every dashboard on Thanos: no direct queries, yet 7d still read about
+**5 GB a minute**, all of it the sidecar serving its last two days. Those are
+about 1.35 GB of blocks against roughly 0.9 GB of page cache left in
+Prometheus's `2Gi`, so every refresh reads them again, and a cluster-wide panel
+can time out. Not fixed: more memory on a one-node cluster costs more than a slow
+7d view, which nobody opens by accident. The free lever, if it ever matters, is
+the sidecar's `minTime: -1d`, at the price of half entry 25's upload margin.
 
 **The obvious memory alert does not work, and was not added.** Working set over
 limit read **0.83** during the thrash, nowhere near the >0.95 such a rule needs,
@@ -1983,6 +1990,10 @@ what the sidecar still serves.
   queries go to the store gateway. Two days read from Prometheus was measured fast
   once entry 11 gave it page cache, and two days also leaves the bucket that much
   margin if uploads stall.
+
+  *No longer fast, 2026-11-04:* two days of blocks have outgrown that page
+  cache, and a 7d dashboard through Thanos reads about 5 GB a minute from
+  Prometheus's disk. Accepted; see entry 11.
 - **Thanos is Grafana's default datasource.** Dashboards pick their datasource
   through a variable that defaults to the default, so all of them move. The
   chart's own `Prometheus` datasource stays for dashboards that pin its uid,
