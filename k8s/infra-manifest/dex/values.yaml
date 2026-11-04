@@ -95,6 +95,12 @@ config:
         - https://id.scouterna.se/realms/master/broker/dex/endpoint
         - https://admin.id.scouterna.se/realms/master/broker/dex/endpoint
       secretEnv: SCOUTID_KEYCLOAK_PROD_CLIENT_SECRET
+    # ScoutID dev Keycloak: one host, so the admin console is on it too.
+    - id: scoutid-keycloak-dev
+      name: ScoutID Keycloak (dev)
+      redirectURIs:
+        - https://dev1.id.scouterna.se/realms/master/broker/dex/endpoint
+      secretEnv: SCOUTID_KEYCLOAK_DEV_CLIENT_SECRET
 
 # Inject the GitHub client secret and the Headlamp client secret from the
 # ESO-managed Kubernetes secret `dex-oauth`, and the ScoutID client secrets
@@ -120,6 +126,11 @@ envVars:
     valueFrom:
       secretKeyRef:
         name: dex-scoutid-keycloak-prod      # sealedsecret-scoutid-keycloak-prod.yaml
+        key: client-secret
+  - name: SCOUTID_KEYCLOAK_DEV_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: dex-scoutid-keycloak-dev       # sealedsecret-scoutid-keycloak-dev.yaml
         key: client-secret
 
 ingress:
