@@ -92,9 +92,10 @@ Commit **both** the JSON and the regenerated `dashboards-cm/*.yaml`.
    it is per-instance state that only adds diff noise and invites confusion with
    the grafana.com dashboard number. Keep `uid` and `title`; those are the
    identity.
-4. **Point datasource template variables at the real datasource names**
-   (`Prometheus`, `Loki`, `Thanos` — see `kube-prometheus-stack-values.yaml`) by
-   setting each variable's `current`, so it renders without touching the picker.
+4. **Set each datasource template variable's `current` to `default`**, so it
+   renders without touching the picker and long ranges go through Thanos.
+   Pinning `Prometheus` makes a 7d view read Prometheus's 2h blocks from disk
+   (decisions.md entry 25).
 5. **Check the metrics actually exist** before trusting the dashboard — a panel
    querying a metric nothing exports is silently empty, not an error:
    ```bash

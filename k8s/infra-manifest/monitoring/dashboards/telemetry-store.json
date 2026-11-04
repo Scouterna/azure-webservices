@@ -3793,8 +3793,8 @@
     "list": [
       {
         "current": {
-          "text": "Prometheus",
-          "value": "prometheus",
+          "text": "default",
+          "value": "default",
           "selected": true
         },
         "label": "Data source",
