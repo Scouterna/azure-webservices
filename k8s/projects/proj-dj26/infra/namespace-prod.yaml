@@ -1,0 +1,15 @@
+# Prod namespace for the project.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: proj-dj26-prod
+  labels:
+    scouterna.se/project: proj-dj26
+    scouterna.se/env: prod
+    # Pod Security Admission — without these the namespace is unprotected and
+    # nothing reports it. Rationale: docs/security.md. Bumping enforce-version
+    # after an AKS upgrade: docs/maintenance.md.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
