@@ -1,0 +1,40 @@
+# Developer / team access for this project.
+#
+# Developers authenticate via GitHub SSO (Dex + AKS structured auth): a developer
+# IS their GitHub identity. There is NO ServiceAccount and NO token to hand out.
+# Access = a RoleBinding binding a GitHub identity into each namespace. Two kinds
+# of subject, and you can mix both in this file:
+#
+#   - kind: Group  "aks:jwt:<org>:<Team Display Name>"  — a whole GitHub TEAM
+#       RECOMMENDED for real teams: membership is then managed in GitHub (add /
+#       remove people from the team) with no cluster change or commit.
+#   - kind: User   "aks:jwt:<github-login>"             — a single developer
+#       For one-off / individual access.
+#
+# Use ClusterRole `admin` for full control within the namespace, or `view` for
+# read-only. Add one RoleBinding PER NAMESPACE the team/developer should access.
+#
+# The team string uses the display name VERBATIM (spaces included) and fails
+# silently if wrong. Read it from a real token instead of guessing:
+#   kubectl auth whoami -o json | grep aks:jwt
+# See docs/onboarding.md section B.
+---
+# The DJ26 team (E-tjänster > E-tjänster Projekt > DJ26), read-only: prod is the
+# only environment and its changes go through the project's GitOps repo
+# (self-heal reverts hand edits anyway). Only DIRECT members match: Dex takes
+# groups from GitHub's /user/teams, which lists no parent or child teams.
+# roleRef is immutable — to change the role, delete this block and add a new one
+# (docs/onboarding.md section B).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dj26-team-view
+  namespace: proj-dj26-prod
+subjects:
+  - kind: Group
+    name: "aks:jwt:Scouterna:DJ26"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
