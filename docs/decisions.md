@@ -476,8 +476,9 @@ useless is to fill it on day one. `critical` gets its own route with a 1h repeat
 `warning` groups on the 12h default. `Watchdog` goes to `"null"` — it fires
 constantly by design and only matters if you are checking that the pipeline itself
 works. So does `InfoInhibitor`: it carries `severity: none`, so neither the `info`
-route nor the chart's self-inhibit rule catches it, and it fell through to the
-Slack default. Raising `info` back up is a one-line change once the channel is quiet.
+route nor the chart's inhibit rule that targets `InfoInhibitor` stops it, and it
+fell through to the Slack default. Raising `info` back up is a one-line change
+once the channel is quiet.
 
 **The API-server SLO rule groups are disabled, all three.** AKS runs the API
 server, so these rules are written for operators of a self-managed control plane.
