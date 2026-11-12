@@ -237,9 +237,9 @@ alertmanager:
       repeat_interval: 12h
       receiver: slack
       routes:
-        # Watchdog fires constantly by design — it proves the pipeline works and is
-        # useless as a notification.
-        - matchers: ['alertname = "Watchdog"']
+        # Watchdog proves the pipeline works; InfoInhibitor (severity: none) only
+        # drives the info inhibit rule. Neither is a notification.
+        - matchers: ['alertname =~ "Watchdog|InfoInhibitor"']
           receiver: "null"
         # 155 of the ~158 rules are the chart's; info-level is noise on a
         # single-node cluster and would drown the rest on day one.
