@@ -39,6 +39,8 @@ revision: main
 # `selfHeal` optional, default true. false with automated: true syncs on each
 #             commit or new image but leaves hand edits alone in between.
 environments:
+  # Image Updater rolls it to the newest x.y.z release tag — infra-manifest/
+  # argocd-image-updater/registrations/proj-dj26.yaml.
   - name: prod
     sourcePath: k8s/prod
     automated: true

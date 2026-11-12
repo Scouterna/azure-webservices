@@ -1,7 +1,7 @@
 # Wave 4 — ArgoCD Image Updater: rolls a project's DEV Application to the newest
-# digest of a moving tag, so a push to the app repo deploys with no infra commit.
-# Chart plus the per-project registrations in registrations/. Dev only, and why:
-# docs/decisions.md entry 27.
+# digest of a moving tag, or a PROD Application to its newest release tag, so a
+# push to the app repo deploys with no infra commit. Chart plus the per-project
+# registrations in registrations/. Why: docs/decisions.md entries 27 and 32.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

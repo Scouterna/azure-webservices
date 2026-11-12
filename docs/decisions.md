@@ -41,6 +41,7 @@ say why rather than deleting it.
 | [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
 | [30](#30-files-shared-volumes-are-backed-up-by-file-copy) | `files-shared` volumes are backed up by file copy | current, amends 23 |
 | [31](#31-commit-titles-are-conventional-commits-checked-on-the-pr-title) | Commit titles are Conventional Commits, checked on the PR title | current |
+| [32](#32-a-prod-environment-may-follow-release-tags-through-argocd-image-updater) | A prod environment may follow release tags through ArgoCD Image Updater | current, amends 27 |
 
 ---
 
@@ -2075,7 +2076,8 @@ worked this way on its own cluster.
 
 **Dev only.** The deployed digest lives on the live Application, not in Git, so Git
 no longer says exactly what runs. That is acceptable where the point is "the
-latest build"; in prod, a pinned tag in Git stays the record.
+latest build"; in prod, a pinned tag in Git stays the record. Amended by entry 32:
+a prod environment may follow *release* tags.
 
 **The requirements it puts on an environment.** The path must be a Kustomize
 directory — the updater writes to `kustomize.images` and cannot edit plain YAML —
@@ -2294,3 +2296,39 @@ the title is the only part that reaches `main`. The workflow also runs on
   red, but the commit is already live. Only removing the bypass prevents it.
 - **Earlier history is not rewritten.** Commits before this entry use plain
   sentences.
+
+
+## 32. A prod environment may follow release tags through ArgoCD Image Updater
+
+**Current, amends 27.** Infra may register a project's **prod** Application with
+the updater when the project asks for it, using the `semver` strategy and an
+`allowTags` filter that admits release tags only (`^\d+\.\d+\.\d+$`). Each new
+release on the registry is then deployed with no commit anywhere. Same mechanics
+and requirements as entry 27: Kustomize path, automated sync, the tag written to
+the live Application's `spec.source.kustomize.images`. First used for
+`proj-dj26-prod` (Scoutin).
+
+**Why.** Where the app repo cuts release tags deliberately, a second step in the
+GitOps repo only adds a chance to forget it. Pushing the tag becomes the release.
+
+**What it costs.**
+
+- **Git no longer says which version runs.** The base manifest keeps a pinned
+  `<version>@sha256:<digest>` as the starting point; the live Application's
+  `spec.source.kustomize.images` overrides it. A version bump in Git does
+  nothing while the override is set.
+- **The tag is not pinned by digest.** The updater writes `newTag` only. A
+  re-pushed release tag is not picked up (the tag did not change) but would be
+  pulled by a restarted pod. Release tags are treated as immutable by the app
+  repo.
+- **No one picks the time.** A release lands within the updater's poll interval,
+  whenever it is tagged. The app repo, not this cluster, decides when to tag.
+
+**Rolling back** is a new, higher release tag. Tagging an older commit with a
+lower version is ignored by `semver`.
+
+**Rejected:**
+
+- *A pinned version in Git, bumped by Renovate or Dependabot.* Keeps Git the
+  record, but needs a bot installed and a merge per release; for proj-dj26 the
+  project asked for the tag alone to deploy.

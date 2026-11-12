@@ -1,0 +1,28 @@
+# proj-dj26 prod follows Scoutin's release tags: every new x.y.z on ghcr is
+# deployed, nothing else (decisions.md entry 32). The Application must be
+# Kustomize (the tag is written to spec.source.kustomize.images) and must
+# auto-sync, or the new tag is recorded but never rolled out.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: proj-dj26
+  namespace: argocd
+spec:
+  applicationRefs:
+    # Exact name, never a glob.
+    - namePattern: proj-dj26-prod
+      writeBackConfig:
+        method: argocd
+      commonUpdateSettings:
+        # Highest version among the allowed tags.
+        updateStrategy: semver
+        # Releases only: no sha-* build tags, no pre-releases.
+        allowTags: regexp:^\d+\.\d+\.\d+$
+        # As for proj-wsj27: ArgoCD 3.4 leaves status.summary.images empty.
+        forceUpdate: true
+      images:
+        - alias: scoutin
+          imageName: ghcr.io/scouterna/scoutin-2
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/scouterna/scoutin-2
