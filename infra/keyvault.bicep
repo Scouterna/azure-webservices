@@ -11,7 +11,7 @@
 //
 // Deploy:
 //   az deployment group create -g webservices-infra \
-//     -f infra/keyvault.bicep -p keyVaultName=<name>
+//     -f infra/keyvault.bicep -p keyVaultName=<name> -p auditWorkspaceName=<workspace>
 // =============================================================================
 
 @description('Key Vault name (globally unique, 3-24 chars, alphanumeric + hyphens).')
@@ -24,6 +24,9 @@ param location string = resourceGroup().location
 
 @description('Enable purge protection (cannot be turned off once on; blocks permanent deletion for 90 days).')
 param enablePurgeProtection bool = true
+
+@description('Log Analytics workspace (same RG) for the vault\'s audit log. Empty only on a first install, before install.md §5b has created it — docs/decisions.md entry 9.')
+param auditWorkspaceName string = ''
 
 @description('Resource tags.')
 param tags object = {
@@ -67,6 +70,28 @@ resource vaultLock 'Microsoft.Authorization/locks@2020-05-01' = {
   properties: {
     level: 'CanNotDelete'
     notes: 'Remove the lock deliberately before any intended deletion.'
+  }
+}
+
+// Who read which secret, and with which API version. Dropping the param on a
+// redeploy leaves the setting in place (incremental mode). docs/decisions.md entry 9.
+resource auditWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = if (!empty(auditWorkspaceName)) {
+  name: auditWorkspaceName
+}
+
+resource vaultAudit 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(auditWorkspaceName)) {
+  name: 'audit-to-log-analytics'
+  scope: vault
+  properties: {
+    workspaceId: auditWorkspace.id
+    // Dedicated = the AZKVAuditLogs table, not AzureDiagnostics.
+    logAnalyticsDestinationType: 'Dedicated'
+    logs: [
+      {
+        category: 'AuditEvent'
+        enabled: true
+      }
+    ]
   }
 }
 

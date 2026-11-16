@@ -394,13 +394,12 @@ choices already made. These are gaps that should close.
 
 | Gap | What it means today | What closes it |
 |---|---|---|
-| **No record of Key Vault secret reads** — no diagnostic setting on `infra/keyvault.bicep` | The vault is the cluster's root of trust, and `kube-audit-admin` cannot record reads either, so nothing shows which secrets were read or by whom | `Microsoft.Insights/diagnosticSettings` on the vault (`AuditEvent`) to the same workspace |
 | **No image or manifest scanning in CI** — [`checks.yml`](../.github/workflows/checks.yml) validates YAML, placeholders and two security invariants only; images are pinned by tag, not digest | A compromised or vulnerable upstream tag is adopted on the next pull, silently | Trivy + kube-linter in CI; digest pinning with Renovate keeping digests current |
 
-Two entries have left this list. API-server audit retention: `kube-audit-admin`
-ships to a capped Log Analytics workspace ([decisions.md](decisions.md) entry 9) —
-though it records mutations, **not reads**, which is why the Key Vault row above
-stays. And Alertmanager now has a Slack receiver plus rules for the platform's own
+Three entries have left this list. API-server audit retention: `kube-audit-admin`
+ships to a capped Log Analytics workspace ([decisions.md](decisions.md) entry 9).
+It records mutations but **not reads**, so the vault now ships its own `AuditEvent`
+log to the same workspace, which records who read which secret. And Alertmanager now has a Slack receiver plus rules for the platform's own
 controls failing ([decisions.md](decisions.md) entry 11), so a stalled
 `ExternalSecret` or a backup that stops running is no longer silent.
 
