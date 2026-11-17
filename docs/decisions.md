@@ -327,12 +327,18 @@ cluster and the table setting persists with it.
 
 **What this does not give.** Attribution for the local admin certificate is still
 Azure-side only — requests arrive as `masterclient` whatever the audit log records
-(see [cluster-access.md](cluster-access.md)). And **Key Vault reads are not
-audited**: no diagnostic setting exists on the vault, so there is no record of which
-secrets were read from the cluster's root of trust. Given that this category cannot
-record Kubernetes reads either, that is the notable remaining gap — it is the half
-of the original finding this change does not close, and it stays listed in
-[maintenance.md](maintenance.md). **Alerting for this workspace is Azure-side.**
+(see [cluster-access.md](cluster-access.md)).
+
+**Key Vault reads are audited in the same workspace.** Because this category
+cannot record Kubernetes reads, the vault records its own: `infra/keyvault.bicep` carries a
+diagnostic setting that ships `AuditEvent` to this workspace's `AZKVAuditLogs` table.
+That records who read which secret from the cluster's root of trust, and with which
+API version. The second part is what Microsoft's API-retirement notices ask you to
+find. The volume is negligible, because External Secrets refreshes every 24h. The
+parameter is optional only because a first install creates the vault (§3) before
+the workspace (§5b).
+
+**Alerting for this workspace is Azure-side.**
 In-cluster alerting now exists (entry 11), but this workspace never depended on it
 and still should not — these rules must fire when the cluster is the problem:
 `infra/alerts.bicep` carries an action group with an email receiver and three

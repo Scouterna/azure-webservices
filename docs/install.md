@@ -365,6 +365,19 @@ cluster with its own durable resources overrides both.
 > a lot of API traffic. Raise `dailyQuotaGb` deliberately if that trade-off is
 > wrong for you; the reasoning is in [decisions.md](decisions.md) entry 9.
 
+**Then point the vault's audit log at it.** §3 deployed the vault before this
+workspace existed. Re-run it with the workspace, so the vault records every secret
+read ([decisions.md](decisions.md) entry 9). On a rebuild the workspace already
+exists, so you can pass the parameter in §3 directly:
+
+```bash
+az deployment group create -g $INFRA_RG -f infra/keyvault.bicep \
+  -p keyVaultName=$KEY_VAULT_NAME -p auditWorkspaceName=$LOG_WORKSPACE
+
+az monitor diagnostic-settings list --resource "$(az keyvault show -n $KEY_VAULT_NAME --query id -o tsv)" \
+  --query '[].{name:name, logs:logs[?enabled].category}' -o json   # expect audit-to-log-analytics, AuditEvent
+```
+
 ## 5c. Audit alerting
 
 Three rules, deployed outside the cluster so they still fire when the cluster is
