@@ -399,14 +399,16 @@ choices already made. These are gaps that should close.
 Three entries have left this list. API-server audit retention: `kube-audit-admin`
 ships to a capped Log Analytics workspace ([decisions.md](decisions.md) entry 9).
 It records mutations but **not reads**, so the vault now ships its own `AuditEvent`
-log to the same workspace, which records who read which secret. And Alertmanager now has a Slack receiver plus rules for the platform's own
-controls failing ([decisions.md](decisions.md) entry 11), so a stalled
-`ExternalSecret` or a backup that stops running is no longer silent.
+log to the same workspace, which records who read which secret. And Alertmanager
+now has a Slack receiver plus rules for the platform's own controls failing
+([decisions.md](decisions.md) entry 11), so a stalled `ExternalSecret` or a backup
+that stops running is no longer silent.
 
-Both remaining gaps are about *visibility of reads and of supply chain*, not
-delivery: alerts now reach Slack, so "it would be noticed" is true of a control
-that breaks. It is still not true of a secret being read — in Kubernetes or in the
-vault — which is what the first row is for.
+The remaining gap is about *visibility of the supply chain*, not delivery: alerts
+reach Slack, so "it would be noticed" is true of a control that breaks, but not of
+a bad upstream image. Reads of Kubernetes Secrets are still unrecorded; that is
+accepted in [decisions.md](decisions.md) entry 9, and the vault's audit log covers
+the secrets at their source.
 
 ## Accepted risks (revisit deliberately)
 

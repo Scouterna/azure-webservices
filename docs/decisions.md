@@ -330,7 +330,7 @@ Azure-side only — requests arrive as `masterclient` whatever the audit log rec
 (see [cluster-access.md](cluster-access.md)).
 
 **Key Vault reads are audited in the same workspace.** Because this category
-cannot record Kubernetes reads, the vault records its own: `keyvault.bicep` carries a
+cannot record Kubernetes reads, the vault records its own: `infra/keyvault.bicep` carries a
 diagnostic setting that ships `AuditEvent` to this workspace's `AZKVAuditLogs` table.
 That records who read which secret from the cluster's root of trust, and with which
 API version. The second part is what Microsoft's API-retirement notices ask you to
