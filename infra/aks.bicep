@@ -143,8 +143,8 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
       }
     }
 
-    // `system`: platform + production, MANUAL scaling. `spot`: opt-in dev/staging.
-    // Both in the same zone (entry 15). Both listed here so a redeploy declares both.
+    // `system` only: platform + production, MANUAL scaling. The `spot` pool is a
+    // child resource below — AKS rejects a new pool added through this array.
     agentPoolProfiles: [
       {
         name: 'system'
@@ -163,28 +163,34 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
           maxSurge: '33%'
         }
       }
-      {
-        // AKS labels and taints it kubernetes.azure.com/scalesetpriority=spot:NoSchedule.
-        // Pods opt in with a toleration + required node affinity (docs/onboarding.md).
-        name: 'spot'
-        mode: 'User'
-        type: 'VirtualMachineScaleSets'
-        vmSize: spotVmSize
-        osType: 'Linux'
-        osSKU: 'AzureLinux'
-        osDiskType: 'Managed'
-        osDiskSizeGB: osDiskSizeGB
-        availabilityZones: zones
-        scaleSetPriority: 'Spot'
-        scaleSetEvictionPolicy: 'Delete'
-        spotMaxPrice: -1 // evicted for capacity only, never for price
-        // Autoscaler exists only to bring an evicted node back; min 0 = no cost when unused.
-        enableAutoScaling: true
-        minCount: 0
-        maxCount: spotMaxCount
-        maxPods: 30 // smaller per-pod kubelet memory reserve than 110 on an 8 GB VM
-      }
     ]
+  }
+}
+
+// `spot`: opt-in dev/staging, same zone as `system` (entry 15). A child resource,
+// not in agentPoolProfiles: AKS refuses to add a pool to an existing cluster that
+// way. AKS labels and taints it kubernetes.azure.com/scalesetpriority=spot:NoSchedule;
+// pods opt in with a toleration + required node affinity (docs/onboarding.md).
+resource spotPool 'Microsoft.ContainerService/managedClusters/agentPools@2026-03-01' = {
+  parent: aks
+  name: 'spot'
+  properties: {
+    mode: 'User'
+    type: 'VirtualMachineScaleSets'
+    vmSize: spotVmSize
+    osType: 'Linux'
+    osSKU: 'AzureLinux'
+    osDiskType: 'Managed'
+    osDiskSizeGB: osDiskSizeGB
+    availabilityZones: zones
+    scaleSetPriority: 'Spot'
+    scaleSetEvictionPolicy: 'Delete'
+    spotMaxPrice: -1 // evicted for capacity only, never for price
+    // Autoscaler exists only to bring an evicted node back; min 0 = no cost when unused.
+    enableAutoScaling: true
+    minCount: 0
+    maxCount: spotMaxCount
+    maxPods: 30 // smaller per-pod kubelet memory reserve than 110 on an 8 GB VM
   }
 }
 
