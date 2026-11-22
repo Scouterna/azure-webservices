@@ -2314,8 +2314,8 @@ the title is the only part that reaches `main`. The workflow also runs on
 shared Postgres and every production and group namespace. A workload runs on the
 spot node only if it opts in from its own manifests, with a toleration and a
 *required* node affinity for `kubernetes.azure.com/scalesetpriority=spot`
-([onboarding.md](onboarding.md)). The first opt-in is `proj-wsj27-dev`. Tracked
-in issue #73.
+([onboarding.md](onboarding.md)). The planned first opt-in is
+`proj-wsj27-dev`, in its own repo. Tracked in issue #73.
 
 **Why.** The single core node was 86% reserved on CPU and 81% on memory
 (2026-10-16), while actual use was about 14% of the CPU. The next regular node
@@ -2359,7 +2359,7 @@ Loki, and their volume backups would fail. Node exporter already tolerates every
   namespace marked in the project template. It is left out until the pool has
   proved itself.
 - **Evictions can make noise.** A dev env going `Pending` or a failed backup can
-  reach Slack. That is accepted while it is one pilot namespace. Routing comes
+  reach Slack. That is accepted while only a pilot namespace uses spot. Routing comes
   later, if evictions turn out to be frequent.
 - **Capacity percentages shift.** The governance alerts divide by allocatable
   summed over *all* nodes, so the spot node makes every namespace look smaller
