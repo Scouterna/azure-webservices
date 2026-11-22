@@ -2353,6 +2353,33 @@ they skip the spot node without any error: logs from spot pods would never reach
 Loki, and their volume backups would fail. Node exporter already tolerates every
 `NoSchedule` taint.
 
+**The pool is its own `agentPools` resource, not a second `agentPoolProfiles`
+entry.** The first version listed `spot` next to `system` in the cluster's
+`agentPoolProfiles`. The what-if then failed preflight: *"Adding agent pools to an
+existing cluster is not allowed through managed cluster operations."* That array
+can only create pools when the cluster itself is created. Any pool added later is
+a `managedClusters/agentPools` child resource. With that change, the what-if
+created only the new pool and left `system` unchanged.
+
+**Drilled on 2026-11-22, with a single-replica opted-in Deployment in
+`user-hakan-persson`.**
+- With the pool at zero nodes, the Pending pod triggered a scale-up from 0 to 1
+  nodes. The pod was running about 1.5 minutes later.
+- The node had the spot taint and was in zone 1. It offered 7.0 GiB of memory
+  and 1.9 CPU to pods. Alloy, the Velero node agent and node exporter all
+  started on it.
+- `az vmss simulate-eviction` at 21:46:11 UTC evicted the pod. Its replacement
+  went `Pending` and did not move to the core node. The VM was deleted, the
+  autoscaler created a new one, and the pod was running again at 21:48:56,
+  about 2¾ minutes after the eviction. Alloy and the node agent came back with
+  it.
+- Nothing reached Slack. The only alert raised was info-level, which goes to the
+  null receiver.
+
+Not covered by the drill: logs from a spot pod arriving in Loki, and a
+`files-shared` backup of a pod on the spot node. The test pod wrote no logs and
+had no volume. The `proj-wsj27-dev` pilot is the first real test of both.
+
 **What is accepted in this first version.**
 - **Opt-in is per workload.** A forgotten toleration quietly runs the pod on the
   core node. The planned fix is an admission policy that places every pod in a
