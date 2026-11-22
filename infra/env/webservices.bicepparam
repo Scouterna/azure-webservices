@@ -17,6 +17,8 @@ param kubernetesVersion = '1.36'  // minor alias only — the patch channel owns
 param skuTier = 'Free'          // 'Free' = no paid API-server SLA (budget). 'Standard' to buy the SLA.
 param vmSize = 'Standard_D4s_v6' // Intel, 4 vCPU / 16 GB, 12 data disks — disks are the binding limit.
 param nodeCount = 1              // Manual scaling: bump this + redeploy to add nodes.
+param spotVmSize = 'Standard_D2s_v6' // spot pool for opt-in dev/staging (decisions.md 32)
+param spotMaxCount = 1               // autoscaler only replaces an evicted node, never grows past this
 param zones = ['1']              // ONE zone — disks cannot cross zones (decisions.md 15).
 
 // --- Audit logging (docs/decisions.md 9) ---

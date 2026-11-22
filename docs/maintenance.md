@@ -126,6 +126,21 @@ A pod whose disk is in a zone with no node stays `Pending` **permanently** with
 *"node(s) didn't match PersistentVolume's node affinity"* — it does not resolve
 on its own, and the fix is to add a node back in that zone.
 
+**The spot pool** (`spot`, decisions.md entry 32) runs only dev and staging that
+opted in. It gets the same patch and node-image upgrades as the core pool.
+Eviction deletes the VM, and the autoscaler adds one back, up to
+`spotMaxCount`, once pods are `Pending` and Azure has capacity. See what it is
+doing:
+
+```bash
+kubectl get nodes -L kubernetes.azure.com/scalesetpriority
+kubectl get pods -A --field-selector=status.phase=Pending
+kubectl -n kube-system get configmap cluster-autoscaler-status -o yaml   # if present
+```
+
+Raising `spotMaxCount` or changing `spotVmSize` is a reviewed Bicep change, like
+`nodeCount`.
+
 **Why node images stay on a channel.** An automatic node-image upgrade will
 replace the node, which is disruptive, and on 2026-08-24 it left the test
 cluster's pool in `provisioningState: Failed` with two nodes billing instead of

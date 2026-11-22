@@ -121,6 +121,11 @@ controller:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+    # Spot pool (decisions.md entry 32) — without it, logs from spot pods are lost silently.
+    - key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+      effect: NoSchedule
 
 service:
   enabled: false
