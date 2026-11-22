@@ -158,6 +158,10 @@ defaultRules:
   # switch reads as a counter reset and rate() invents 5xx. decisions.md entry 11.
   disabled:
     KubeClientErrors: true
+    # "Survive losing the largest node" counts the opt-in spot node as spare room
+    # for core pods, so both fire whenever it is up. decisions.md entry 32.
+    KubeCPUOvercommit: true
+    KubeMemoryOvercommit: true
 
 # AKS does not expose the controller manager or the scheduler, and Cilium
 # replaces kube-proxy, so all three Services sit with zero endpoints and their

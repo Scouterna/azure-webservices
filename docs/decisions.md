@@ -518,6 +518,9 @@ the artifact has to cross, and the Standard control-plane tier would not help.
 `KubeAggregatedAPIErrors`, `KubeAggregatedAPIDown` and `KubeAPITerminatedRequests`
 read the same target the same way and stay enabled until they misfire.
 
+**`KubeCPUOvercommit` and `KubeMemoryOvercommit` are disabled too, on
+2026-11-22.** The spot pool made them fire; the reasoning is in entry 32.
+
 **Setting `config` replaces the chart default wholesale**, so the four inhibit
 rules are carried over by hand rather than inherited. They are what stops one
 critical alert dragging its warning and info siblings along. Dropping them would
@@ -2388,6 +2391,13 @@ had no volume. The `proj-wsj27-dev` pilot is the first real test of both.
 - **Evictions can make noise.** A dev env going `Pending` or a failed backup can
   reach Slack. That is accepted while only a pilot namespace uses spot. Routing comes
   later, if evictions turn out to be frequent.
+- **The node-failure overcommit alerts are off.** `KubeCPUOvercommit` and
+  `KubeMemoryOvercommit` check whether the pods' requests would still fit after
+  losing the largest node. A one-node cluster skips them. With the spot node up,
+  they counted its 1.9 CPU and 7.0 GiB as spare room and fired 10 minutes into
+  the drill: requests exceeded that room by 0.95 CPU and 4.7 GB. That room is not
+  real, since only opted-in pods may use the spot node. With one core node the
+  check had nothing to say anyway, and #72 covers capacity per pool.
 - **Capacity percentages shift.** The governance alerts divide by allocatable
   summed over *all* nodes, so the spot node makes every namespace look smaller
   relative to the core node. Per-pool capacity is issue #72.
