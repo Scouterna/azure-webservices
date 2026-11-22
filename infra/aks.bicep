@@ -10,9 +10,11 @@
 //   (+ availabilityZones                 -> zonal placement)
 //
 // Budget notes:
-//   - Single node pool (mode System) runs everything. Add a node by bumping
-//     `nodeCount` and redeploying; add a dedicated user pool later if needed.
-//   - Autoscaling is OFF on purpose: scaling is a reviewed parameter change.
+//   - The `system` pool runs the platform and production. Add a node by
+//     bumping `nodeCount` and redeploying.
+//   - Autoscaling is OFF there on purpose: scaling is a reviewed parameter change.
+//   - The `spot` pool is for dev/staging that opt in. It autoscales only to
+//     replace an evicted node, up to `spotMaxCount`. docs/decisions.md entry 32.
 //
 // Deploy (subscription is selected out-of-band via `az account set` / the RG;
 // no subscription ID lives in this repo):
@@ -41,6 +43,12 @@ param vmSize string = 'Standard_D4s_v6'
 
 @description('Node count. MANUAL scaling — bump this and redeploy to add nodes (no autoscaler).')
 param nodeCount int = 1
+
+@description('VM size for the spot pool (dev/staging only). docs/decisions.md entry 32.')
+param spotVmSize string = 'Standard_D2s_v6'
+
+@description('Spot pool ceiling. The autoscaler only replaces evicted nodes up to this; raising it is a reviewed change.')
+param spotMaxCount int = 1
 
 @description('Managed OS disk size (GB). 128 = the AKS default.')
 param osDiskSizeGB int = 128
@@ -135,8 +143,8 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
       }
     }
 
-    // Single node pool (mode System) — VMSS, zonal, MANUAL scaling.
-    // Add a dedicated user pool later if load demands it
+    // `system`: platform + production, MANUAL scaling. `spot`: opt-in dev/staging.
+    // Both in the same zone (entry 15). Both listed here so a redeploy declares both.
     agentPoolProfiles: [
       {
         name: 'system'
@@ -154,6 +162,27 @@ resource aks 'Microsoft.ContainerService/managedClusters@2026-03-01' = {
         upgradeSettings: {
           maxSurge: '33%'
         }
+      }
+      {
+        // AKS labels and taints it kubernetes.azure.com/scalesetpriority=spot:NoSchedule.
+        // Pods opt in with a toleration + required node affinity (docs/onboarding.md).
+        name: 'spot'
+        mode: 'User'
+        type: 'VirtualMachineScaleSets'
+        vmSize: spotVmSize
+        osType: 'Linux'
+        osSKU: 'AzureLinux'
+        osDiskType: 'Managed'
+        osDiskSizeGB: osDiskSizeGB
+        availabilityZones: zones
+        scaleSetPriority: 'Spot'
+        scaleSetEvictionPolicy: 'Delete'
+        spotMaxPrice: -1 // evicted for capacity only, never for price
+        // Autoscaler exists only to bring an evicted node back; min 0 = no cost when unused.
+        enableAutoScaling: true
+        minCount: 0
+        maxCount: spotMaxCount
+        maxPods: 30 // smaller per-pod kubelet memory reserve than 110 on an 8 GB VM
       }
     ]
   }

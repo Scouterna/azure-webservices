@@ -25,6 +25,12 @@ param vmSize string = 'Standard_D4s_v6'
 @description('Node count (manual scaling).')
 param nodeCount int = 1
 
+@description('Spot pool VM size (dev/staging). docs/decisions.md entry 32.')
+param spotVmSize string = 'Standard_D2s_v6'
+
+@description('Spot pool autoscaler ceiling.')
+param spotMaxCount int = 1
+
 @description('Availability zone — ONE. Azure disks cannot cross zones; see docs/decisions.md entry 15.')
 param zones string[] = ['1']
 
@@ -43,6 +49,8 @@ module aks 'aks.bicep' = {
     skuTier: skuTier
     vmSize: vmSize
     nodeCount: nodeCount
+    spotVmSize: spotVmSize
+    spotMaxCount: spotMaxCount
     zones: zones
     auditWorkspaceName: auditWorkspaceName
     auditWorkspaceResourceGroup: auditWorkspaceResourceGroup

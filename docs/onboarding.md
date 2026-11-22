@@ -1023,7 +1023,45 @@ which ArgoCD reverts), and have the project reload its side.
 **Removing** the client is the reverse: the `staticClients` and `envVars`
 entries, and both sealed files, in one commit.
 
-## Persistent state for your app
+## Running dev or staging on the spot node
+
+The cluster has a cheap **spot** node for dev and staging (decisions.md entry 32).
+Azure can take a spot node back at 30 seconds' notice. Your pods then stay
+`Pending` until a spot node is available again, which can take minutes or hours.
+They come back on their own, and nobody has to do anything. Production never
+goes here.
+
+Nothing moves to the spot node by default. Opt in per workload by adding this to
+the pod spec, for example under `spec.template.spec` of a Deployment, StatefulSet
+or CronJob:
+
+```yaml
+tolerations:
+  - key: kubernetes.azure.com/scalesetpriority
+    operator: Equal
+    value: spot
+    effect: NoSchedule
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.azure.com/scalesetpriority
+              operator: In
+              values: [spot]
+```
+
+You need both parts. With only the toleration, the pod *may* use the spot node
+but usually stays on the core node. With only the affinity, it can never be
+scheduled.
+
+- **Dev and staging only.** For a production workload, the platform team will
+  ask you to remove the opt-in.
+- **`files-shared` volumes, ConfigMaps and the shared Postgres work unchanged.**
+  Talk to infra before you combine spot with a `disk-*` PVC.
+- **Check where a pod runs** with `kubectl -n <ns> get pods -o wide`. The node
+  name contains `spot`.
+
 
 State that must survive a pod restart. `emptyDir` does not, and **`hostPath` is
 rejected at admission** by the namespace's Pod Security level — a hostPath pod

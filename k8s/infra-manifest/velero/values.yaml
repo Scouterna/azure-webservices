@@ -40,6 +40,12 @@ nodeAgent:
   # reaches Blob through Workload Identity like the server does.
   podLabels:
     azure.workload.identity/use: "true"
+  # Spot pool (decisions.md entry 32) — without it, files-shared backups of spot pods fail.
+  tolerations:
+    - key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+      effect: NoSchedule
   resources:
     requests:
       cpu: 50m

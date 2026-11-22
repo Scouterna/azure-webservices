@@ -62,6 +62,10 @@ one because an `Application` with `project: infra` would be a one-file escape to
 cluster-admin. Anything from that list is an infra request, delivered through
 `infra/` in this repo.
 
+Dev and staging may opt in to the cheap spot node from their own manifests. It
+is not set here. See `docs/onboarding.md`, "Running dev or staging on the spot
+node".
+
 Moving from B1 to B2 is safe: if the by-hand install matches what the repo says,
 ArgoCD **adopts** the running release without restarting anything.
 

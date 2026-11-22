@@ -41,6 +41,7 @@ say why rather than deleting it.
 | [29](#29-a-project-ships-its-dashboards-from-its-own-repo-into-a-folder-named-for-its-namespace) | A project ships its dashboards from its own repo, into a folder named for its namespace | current |
 | [30](#30-files-shared-volumes-are-backed-up-by-file-copy) | `files-shared` volumes are backed up by file copy | current, amends 23 |
 | [31](#31-commit-titles-are-conventional-commits-checked-on-the-pr-title) | Commit titles are Conventional Commits, checked on the PR title | current |
+| [32](#32-dev-and-staging-may-run-on-one-spot-node-and-wait-out-an-eviction) | Dev and staging may run on one spot node, and wait out an eviction | current, first version |
 
 ---
 
@@ -443,7 +444,7 @@ address and IPv6 egress with it, while AAAA records still resolve to the cluster
 
 **Why that mattered more than it looks.** The redeploy path is routine, not
 exceptional — `aks.bicep`'s own `nodeCount` description calls bumping it and
-redeploying *the* way to add a node (autoscaling is deliberately off), and
+redeploying *the* way to add a node (autoscaling is deliberately off on the core pool; the spot exception is entry 32), and
 enabling the audit diagnostic setting on an existing cluster needs the same
 redeploy. So the trap sat on the ordinary
 scaling path, and would have been discovered as broken IPv6 egress some time after
@@ -2303,3 +2304,66 @@ the title is the only part that reaches `main`. The workflow also runs on
   red, but the commit is already live. Only removing the bypass prevents it.
 - **Earlier history is not rewritten.** Commits before this entry use plain
   sentences.
+
+## 32. Dev and staging may run on one spot node, and wait out an eviction
+
+**Current.** `infra/aks.bicep` has a second pool, `spot`. It is one
+`Standard_D2s_v6` spot VM in zone 1, with `scaleSetEvictionPolicy: Delete`,
+`spotMaxPrice: -1`, `maxPods: 30`, and the autoscaler on with `minCount 0` /
+`maxCount 1`. The `system` pool is unchanged, and it still runs the platform, the
+shared Postgres and every production and group namespace. A workload runs on the
+spot node only if it opts in from its own manifests, with a toleration and a
+*required* node affinity for `kubernetes.azure.com/scalesetpriority=spot`
+([onboarding.md](onboarding.md)). The planned first opt-in is
+`proj-wsj27-dev`, in its own repo. Tracked in issue #73.
+
+**Why.** The single core node was 86% reserved on CPU and 81% on memory
+(2026-10-16), while actual use was about 14% of the CPU. The next regular node
+would double the compute bill. Dev and staging can be down for a while without
+anyone being hurt, and a D2s_v6 spot VM costs about a fifth of the regular price
+(about $14/month against $78, Sweden Central, October 2026).
+
+**Wait, not fall back.** The affinity is *required*, so after an eviction the
+opted-in pods stay `Pending` until a spot node is back. They do not move to the
+core node. Kubernetes never moves a pod back once capacity returns, so a fallback
+would slowly fill the core node with dev, and dev would end up causing the next
+core-node purchase.
+
+**The autoscaler is an exception to "scaling is a reviewed change", and only on
+this pool.** With eviction policy `Delete`, an evicted VM is gone, and a pool
+without the autoscaler stays one node short for good. With it, the `Pending`
+pods bring the node back when Azure has capacity again. `maxCount` is the
+reviewed number (`spotMaxCount` in the bicepparam). The autoscaler cannot grow
+past it, so it cannot buy anything nobody approved. `minCount 0` means the pool
+costs nothing while nobody has opted in. The core pool stays manual, for the
+reasons in issue #73: the autoscaler reacts to unplaceable pods, not to load, so
+on this cluster it would turn every new deployment into an unreviewed purchase.
+
+**Why these settings.**
+- `spotMaxPrice: -1` means Azure evicts only when it needs the capacity, never
+  because the price moved.
+- `maxPods: 30`: AKS reserves kubelet memory per pod slot, about 2.4 GiB on the
+  110-slot core node. At 30 slots the reserve is about 0.65 GiB, which matters
+  on an 8 GB VM. Thirty slots are far more than one project's dev needs.
+- Zone 1 is the same zone as the core pool, for the reasons in entry 15.
+
+**Platform DaemonSets need the toleration too.** Alloy (logs) and the Velero node
+agent (`files-shared` backups, entry 30) carry the spot toleration. Without it
+they skip the spot node without any error: logs from spot pods would never reach
+Loki, and their volume backups would fail. Node exporter already tolerates every
+`NoSchedule` taint.
+
+**What is accepted in this first version.**
+- **Opt-in is per workload.** A forgotten toleration quietly runs the pod on the
+  core node. The planned fix is an admission policy that places every pod in a
+  namespace marked in the project template. It is left out until the pool has
+  proved itself.
+- **Evictions can make noise.** A dev env going `Pending` or a failed backup can
+  reach Slack. That is accepted while only a pilot namespace uses spot. Routing comes
+  later, if evictions turn out to be frequent.
+- **Capacity percentages shift.** The governance alerts divide by allocatable
+  summed over *all* nodes, so the spot node makes every namespace look smaller
+  relative to the core node. Per-pool capacity is issue #72.
+- **No `disk-*` PVCs on spot.** A zonal disk would follow the pod, since both
+  pools are in zone 1, but a dev environment that needs block storage asks first
+  (entry 18).
